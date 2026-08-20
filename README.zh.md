@@ -39,18 +39,26 @@
 
 ## 安装
 
-使用前需要先安装 DeepSeek Harness。通过 GitHub 将插件安装到 `web` profile：
+使用前需要先安装 DeepSeek Harness。通过 npm 将预构建插件安装到 `web` profile：
 
 ```sh
-dsh plugin --profile web add github:muyuanjin/dsh-element-inspector
+dsh plugin --profile web add dsh-element-inspector
 ```
 
-本仓库已包含构建后的运行时入口，因此从 GitHub 安装不需要执行安装期构建脚本。安装后重启对应的 DSH Web 或 Desktop 实例。启动前可以先检查组合后的 profile：
+安装时不需要授予构建脚本执行权限。安装后重启对应的 DSH Web 或 Desktop 实例。启动前可以先检查组合后的 profile：
 
 ```sh
 dsh --profile web --dump-config
 dsh web
 ```
+
+也可以直接从 GitHub 安装本版本的源码快照：
+
+```sh
+dsh plugin --profile web add github:muyuanjin/dsh-element-inspector#v0.5.0
+```
+
+本仓库已包含构建后的运行时入口，因此这种安装方式同样不需要执行安装期构建脚本。
 
 ### 本地源码
 
@@ -95,11 +103,13 @@ profile 会继续链接到该源码目录。修改客户端代码后，请重新
 
 ## 更新与卸载
 
-更新 GitHub 安装时，重新运行安装命令并重启 DSH：
+更新 npm 安装并重启 DSH：
 
 ```sh
-dsh plugin --profile web add github:muyuanjin/dsh-element-inspector
+dsh plugin --profile web update --latest dsh-element-inspector
 ```
+
+从 GitHub 安装时，请用对应的 `github:` 命令安装所需的版本标签。
 
 卸载插件并从 profile 中移除对应 bundle 层：
 

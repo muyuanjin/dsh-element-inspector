@@ -39,18 +39,26 @@ The plugin locates the active profile from the DSH-provided `ctx.baseUrl` and re
 
 ## Installation
 
-An existing DeepSeek Harness installation is required. Install the plugin from GitHub into the `web` profile:
+An existing DeepSeek Harness installation is required. Install the prebuilt package from npm into the `web` profile:
 
 ```sh
-dsh plugin --profile web add github:muyuanjin/dsh-element-inspector
+dsh plugin --profile web add dsh-element-inspector
 ```
 
-This repository includes the built runtime entry points, so the GitHub installation does not require an install-time build script. Restart the corresponding DSH Web or Desktop instance after installation. You can inspect the composed profile before starting it:
+No install-time build permission is required. Restart the corresponding DSH Web or Desktop instance after installation. You can inspect the composed profile before starting it:
 
 ```sh
 dsh --profile web --dump-config
 dsh web
 ```
+
+To install the source snapshot for this release directly from GitHub instead:
+
+```sh
+dsh plugin --profile web add github:muyuanjin/dsh-element-inspector#v0.5.0
+```
+
+The repository includes the built runtime entry points, so this installation also requires no install-time build script.
 
 ### Local Checkout
 
@@ -95,11 +103,13 @@ See the `disclosure` field in [`package.json`](package.json) for the package-lev
 
 ## Updating and Uninstalling
 
-To update a GitHub installation, run the installation command again and restart DSH:
+To update an npm installation and restart DSH:
 
 ```sh
-dsh plugin --profile web add github:muyuanjin/dsh-element-inspector
+dsh plugin --profile web update --latest dsh-element-inspector
 ```
+
+For a GitHub installation, install the desired release tag with the corresponding `github:` command.
 
 To uninstall the plugin and remove its bundle layer from the profile:
 

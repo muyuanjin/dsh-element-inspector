@@ -1,7 +1,7 @@
 {
   "name": "dsh-element-inspector",
   "version": "0.5.0",
-  "description": "识别 DSH 页面元素的插件归属，导出所选元素，并隐藏不需要的界面元素。",
+  "description": "Identify which installed plugin owns a DSH UI element, export the selection, and hide unwanted elements.",
   "type": "module",
   "main": "./index.js",
   "exports": {
@@ -16,11 +16,10 @@
     "portability.js",
     "cordis.patch.yml",
     "README.md",
+    "README.zh.md",
     "LICENSE",
     "SECURITY.md",
-    "dsh-plugin.json",
-    "assets",
-    "marketplace"
+    "dsh-plugin.json"
   ],
   "repository": {
     "type": "git",
@@ -29,6 +28,10 @@
   "homepage": "https://github.com/muyuanjin/dsh-element-inspector#readme",
   "bugs": {
     "url": "https://github.com/muyuanjin/dsh-element-inspector/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "keywords": [
     "deepseek-harness",
@@ -70,18 +73,18 @@
   },
   "disclosure": {
     "cloud": false,
-    "network": "仅访问本机 DSH Host 路由；打开源仓库时由系统浏览器访问插件 package.json 中声明的 URL。",
+    "network": "Only accesses local DSH Host routes; opening a source repository launches the URL declared in the plugin package.json in the system browser.",
     "offlineMode": true,
     "apiKeys": false,
     "permissions": [
-      "读取当前 DSH web profile 中已安装插件的文本源码以匹配元素归属",
-      "通过操作系统文件管理器打开已安装插件目录",
-      "在本地生成所选元素截图，并按浏览器能力复制到剪贴板或下载 PNG",
-      "将所选元素的 HTML 或 Markdown 写入系统剪贴板",
-      "通过 DSH 官方 settings 服务保存快捷键和元素隐藏规则"
+      "Read text source files from plugins installed in the active DSH web profile to match element ownership",
+      "Open installed plugin directories with the operating system file manager",
+      "Capture selected elements locally and copy the PNG to the clipboard or download it",
+      "Copy the selected element as HTML or Markdown to the clipboard",
+      "Store the shortcut and element hiding rules through the official DSH settings service"
     ],
-    "jurisdiction": "本地运行，不上传数据",
-    "retention": "仅在本机保留快捷键和隐藏规则，用户可在插件设置中清除隐藏规则"
+    "jurisdiction": "Runs locally and does not upload data",
+    "retention": "Only the shortcut and hiding rules are retained locally; users can clear hiding rules in the plugin settings"
   },
   "license": "MIT",
   "devDependencies": {
