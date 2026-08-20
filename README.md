@@ -1,111 +1,125 @@
 # dsh-element-inspector
 
-> 非官方 DeepSeek Harness 社区项目，与 DeepSeek 官方无隶属或背书关系。
+English | [简体中文](README.zh.md)
 
-按一下 `F1`，点选页面元素，找出它属于哪个已安装插件。所选元素还可以截图、复制为 HTML 或 Markdown，或者隐藏。
+Inspect a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) UI element, identify the installed plugin that most likely owns it, and export or hide the selection.
 
-![元素选择与归属识别演示](assets/dsh-element-inspector-demo.gif)
+> [!NOTE]
+> This is an unofficial community project. It is not affiliated with or endorsed by DeepSeek.
 
-## 功能
+Press `F1`, point at an element, and click to inspect it. The plugin compares stable DOM markers with the runtime source files of plugins installed in the active DSH profile, then presents the strongest matches and their supporting evidence.
 
-- 元素拾取：高亮鼠标下的元素，单击后分析归属。
-- 归属判断：根据运行时 DOM 标记、嵌套距离和当前 profile 的插件运行时代码建立证据，不依赖预置的第三方插件名单。
-- 定位源码：展示命中的插件版本、源码文件和判断依据。
-- 快速打开：直接打开已安装插件文件夹或其 `package.json` 声明的源仓库。
-- 元素导出：在本地生成所选元素的 PNG 截图，复制 `outerHTML`，或转换为 GitHub Flavored Markdown。
-- 元素隐藏：隐藏选中元素，并在设置中逐条或全部取消。
-- 自定义快捷键：默认 `F1`；快速按两次打开设置，设置页也可重新录入快捷键。
+![Element selection and attribution demo](assets/dsh-element-inspector-demo.gif)
 
-## 界面
+## Features
 
-识别结果：
+- **Element picker**: highlights the element under the pointer and inspects it on click.
+- **Evidence-based attribution**: ranks installed plugins using DOM markers, ancestor distance, and source-code matches instead of a hard-coded plugin catalog.
+- **Source discovery**: shows matching plugin versions, source files, and evidence for each result.
+- **Quick navigation**: opens an installed plugin directory or the source repository declared in its `package.json`.
+- **Element export**: captures a local PNG screenshot, copies `outerHTML`, or converts the selection to GitHub Flavored Markdown.
+- **Persistent hiding**: hides selected elements and lets you restore individual elements or clear all hiding rules.
+- **Configurable shortcut**: uses `F1` by default; press it twice quickly to open settings and record a different shortcut.
 
-![元素归属结果](assets/dsh-element-inspector-result.png)
+## Screenshots
 
-设置与隐藏规则：
+| Attribution result | Settings and hidden-element rules |
+| --- | --- |
+| ![Element attribution result](assets/dsh-element-inspector-result.png) | ![Plugin settings](assets/dsh-element-inspector-settings.png) |
 
-![插件设置](assets/dsh-element-inspector-settings.png)
+## Compatibility
 
-## 兼容性
+| Component | Supported versions or platforms |
+| --- | --- |
+| DeepSeek Harness | `>=0.1.0-rc.8 <0.2.0-0` |
+| DSH platforms | Web and Desktop |
+| Operating systems | Windows, Linux, and macOS |
 
-- DeepSeek Harness：`>=0.1.0-rc.8 <0.2.0-0`
-- Desktop：anywhere-labs `2.0.1-rc8.1` 已验证
-- 操作系统：Windows、Linux、macOS
-- 安装布局：npm/pnpm 普通安装、tgz、`file:`、`link:`、源码目录链接和 npm workspace 提升
+The plugin locates the active profile from the DSH-provided `ctx.baseUrl` and resolves packages through Node.js module search paths. It supports regular npm/pnpm installs, local links, and workspace-hoisted packages without assuming a fixed user directory, drive letter, Desktop data directory, or process working directory.
 
-插件通过 DSH 提供的 `ctx.baseUrl` 定位当前 profile，并沿 Node 标准模块搜索路径解析插件。它不依赖固定的用户名、用户目录、盘符、Desktop 数据目录或进程工作目录。
+## Installation
 
-## 安装
-
-推荐使用 DSH 插件命令安装发布包：
-
-```sh
-dsh plugin --profile web add ./dsh-element-inspector-0.5.0.tgz
-```
-
-从源码目录开发时可以建立链接：
+An existing DeepSeek Harness installation is required. Install the plugin from GitHub into the `web` profile:
 
 ```sh
-dsh plugin --profile web add link:.
+dsh plugin --profile web add github:muyuanjin/dsh-element-inspector
 ```
 
-也可以在目标 DSH profile 目录中使用 npm 或 pnpm：
+This repository includes the built runtime entry points, so the GitHub installation does not require an install-time build script. Restart the corresponding DSH Web or Desktop instance after installation. You can inspect the composed profile before starting it:
 
 ```sh
-npm install ./dsh-element-inspector-0.5.0.tgz
-# 或
-pnpm add ./dsh-element-inspector-0.5.0.tgz
+dsh --profile web --dump-config
+dsh web
 ```
 
-直接使用 npm/pnpm 时，确认 `dsh.profile.bundles` 包含插件名：
+### Local Checkout
 
-```json
-{
-  "dsh": {
-    "profile": {
-      "bundles": ["dsh-element-inspector"]
-    }
-  }
-}
+To develop from a local checkout:
+
+```sh
+git clone https://github.com/muyuanjin/dsh-element-inspector.git
+cd dsh-element-inspector
+pnpm install
+pnpm run build
+dsh plugin --profile web add .
 ```
 
-重启对应 DSH Web/Desktop 实例后按 `F1` 使用。
+The profile remains linked to the checkout. Rebuild the browser bundle and restart DSH after changing client code.
 
-## 使用
+## Usage
 
-1. 按一次快捷键进入拾取模式。
-2. 移动鼠标预览目标范围，单击确认元素；按 `Esc` 可退出。
-3. 查看首选插件和可展开的判断依据。
-4. 截图、复制 HTML、复制 Markdown、打开插件位置，或隐藏该元素。
-5. 快速按两次快捷键进入设置，修改快捷键并管理隐藏规则。
+1. Press the configured shortcut once to enter selection mode.
+2. Move the pointer to preview an element, then click to inspect it. Press `Esc` to cancel.
+3. Review the preferred plugin and expand the evidence for other candidates.
+4. Capture a screenshot, copy HTML or Markdown, open the plugin location, or hide the element.
+5. Press the shortcut twice quickly to change the shortcut or manage hidden-element rules.
 
-截图会优先写入系统剪贴板；浏览器不允许写入图片时自动下载 PNG。HTML 和 Markdown 写入系统剪贴板。截图、DOM 和转换结果均在本地处理，不会上传。
+Screenshots are copied to the system clipboard when the browser allows image writes; otherwise, they are downloaded as PNG files. HTML and Markdown are copied to the clipboard. All capture and conversion work happens locally.
 
-## 禁用与卸载
+## How Attribution Works
 
-禁用时，从 `dsh.profile.bundles` 移除 `dsh-element-inspector` 并重启。卸载时再从 profile dependencies 中移除该包。插件不会修改会话、凭据或其他插件数据。
+The client collects stable signals from the selected element and up to seven ancestors, including IDs, classes, `data-*` attributes, ARIA labels, text, and React owner names. The host scans JavaScript, TypeScript, JSX, TSX, and CSS runtime files from dependencies declared in the active DSH profile.
 
-隐藏规则和快捷键保存在 DSH 官方设置文件的 `dsh-element-inspector` 命名空间中。卸载前可在插件设置中“全部取消隐藏”。
+Unique stable markers and nearer plugin boundaries receive more weight. Shared, generated, or generic markers are discounted. A result is marked as confirmed only when the available evidence is strong and unambiguous; otherwise, it remains a candidate.
 
-## 权限与隐私
+## Privacy and Permissions
 
-- 本地读取：只扫描当前 DSH profile 的 `dependencies` 中已安装插件的文本源码，用于匹配归属。
-- 本地打开：只允许打开 profile 中已安装插件的真实目录；Windows 使用系统文件管理器，macOS 使用 Launch Services，Linux 使用 XDG/GIO。源仓库地址来自对应插件的 `package.json`。
-- 剪贴板与下载：HTML 和 Markdown 仅写入系统剪贴板；截图在当前页面本地渲染，并复制到剪贴板或下载为 PNG。
-- 本地存储：快捷键和隐藏规则通过 DSH 官方 `settingsScope` 写入 Host 设置文档；旧版浏览器配置只做一次性迁移。
-- 网络：插件不上传元素、源码、截图、会话或凭据。点击“打开源仓库”后，系统浏览器会访问相应 URL。
-- API Key：不需要。
+- Reads text runtime files only from plugins declared as dependencies of the active DSH profile.
+- Opens verified installed-plugin directories with the operating system file manager. Repository URLs come from the installed plugin's `package.json`.
+- Writes exported HTML, Markdown, or PNG data to the clipboard, with a local PNG download as the screenshot fallback.
+- Stores the shortcut and hiding rules through the official DSH settings service and keeps a browser-local startup cache. Legacy browser settings are migrated once when possible.
+- Does not upload inspected elements, source files, screenshots, conversations, or credentials. Opening a source repository launches its URL in the system browser.
+- Requires no API keys.
 
-详细披露包含在 `package.json` 的 `disclosure` 字段中。
+See the `disclosure` field in [`package.json`](package.json) for the package-level permission declaration. To report a vulnerability, follow the [security policy](SECURITY.md).
 
-## DSH 集成
+## Updating and Uninstalling
 
-Host 入口 `index.js` 注册本机分析和打开路由，并通过 `dsh-settings` 注册持久化 schema。Web 入口通过官方 `settingsScope` 同步快捷键和隐藏规则。接口包通过 `peerDependencies` 使用，不会把 DSH runtime 打进插件包。
+To update a GitHub installation, run the installation command again and restart DSH:
 
-## 市场提交
+```sh
+dsh plugin --profile web add github:muyuanjin/dsh-element-inspector
+```
 
-仓库根目录包含 `package.json` 的 `dsh` 字段和 `dsh-plugin.json`。`marketplace/` 提供 dsh.pub、Awesome DSH Plugins 和 DeepSeek Harness Discussion #2004 的提交文件。
+To uninstall the plugin and remove its bundle layer from the profile:
+
+```sh
+dsh plugin --profile web remove dsh-element-inspector
+```
+
+The plugin does not modify conversations, credentials, or other plugin data. Before uninstalling, you can open its settings and clear all hidden-element rules.
+
+## Development
+
+The host entry point is [`index.js`](index.js). Browser code lives in [`src/client.js`](src/client.js) and is bundled to [`client.js`](client.js).
+
+```sh
+pnpm run test
+pnpm run build
+```
+
+The test suite covers attribution scoring, portable package resolution, hiding rules, and element export helpers. The build command regenerates the browser bundle with esbuild.
 
 ## License
 
-[MIT](LICENSE)
+Licensed under the [MIT License](LICENSE).
