@@ -55,7 +55,7 @@ function addSignal(signals, seen, signal) {
 export function extractSignals(query) {
   const signals = []
   const seen = new Map()
-  const rows = [query, ...(Array.isArray(query?.ancestors) ? query.ancestors : [])]
+  const rows = [query, ...(Array.isArray(query?.ancestors) ? query.ancestors.slice(0, 7) : [])]
 
   rows.forEach((row, depth) => {
     const id = stableMarker(row?.id, 4)
@@ -65,7 +65,7 @@ export function extractSignals(query) {
       addSignal(signals, seen, { kind: 'class', value, depth, strong: true, weight: 90, label: `class="${value}"` })
     }
 
-    for (const [rawName, rawValue] of Object.entries(row?.attrs ?? {})) {
+    for (const [rawName, rawValue] of Object.entries(row?.attrs ?? {}).slice(0, 32)) {
       const name = clean(rawName, 80).toLowerCase()
       if (!name.startsWith('data-')) continue
       const value = stableMarker(rawValue, 3)

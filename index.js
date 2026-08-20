@@ -1,23 +1,25 @@
 import { readFile, stat } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { relative } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { isDshPackage } from './dsh-metadata.js'
-import { discoverRuntimeCandidates, loaderEntriesFromContext } from './runtime-candidates.js'
+import { discoverRuntimeCandidates, runtimeCandidateByName } from './runtime-candidates.js'
 import { extractSignals, scorePackages } from './scoring.js'
-import { openExternal, profileDirectoryFromBaseUrl, revealDirectory, validatePackageName } from './portability.js'
+import { openExternal, revealDirectory } from './portability.js'
 
 export const name = 'dsh-element-inspector'
-export const inject = ['webServer']
+export const inject = ['connection', 'clientModules']
+export const Config = z.object({})
 
-const PATH = '/__dsh-element-inspector/resolve'
-const OPEN_FOLDER_PATH = '/__dsh-element-inspector/open-folder'
-const OPEN_REPOSITORY_PATH = '/__dsh-element-inspector/open-repository'
+const RPC_CHANNEL = '/dsh-element-inspector'
 const MAX_FILE_BYTES = 1_000_000
 const MAX_RESULTS = 8
-const SOURCE_CACHE_TTL = 5_000
+const SOURCE_CACHE_IDLE_MS = 3 * 60_000
 const SETTINGS_NAMESPACE = settingsNamespace(name)
 const sourceCache = new Map()
+let sourceCacheGraphRev = ''
+let sourceCacheTimer
+
 const HiddenNodeSchema = z.object({
   id: z.string().default(''),
   classes: z.array(z.string()).default([]),
@@ -36,21 +38,6 @@ const SettingsSchema = z.object({
   hidden: z.array(HiddenRuleSchema).default([]),
 })
 
-function json(res, status, value) {
-  const body = JSON.stringify(value)
-  res.statusCode = status
-  res.setHeader('content-type', 'application/json; charset=utf-8')
-  res.setHeader('cache-control', 'no-store')
-  res.end(body)
-}
-
-async function bodyOf(req) {
-  const chunks = []
-  for await (const chunk of req) chunks.push(Buffer.from(chunk))
-  if (Buffer.concat(chunks).length > 32_000) throw new Error('request is too large')
-  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')
-}
-
 function string(value, max = 180) {
   return typeof value === 'string' ? value.trim().slice(0, max) : ''
 }
@@ -63,21 +50,27 @@ function repositoryUrl(manifest) {
   return /^https?:\/\//i.test(normalized) ? normalized : ''
 }
 
-function clientEntries(query) {
-  const values = Array.isArray(query?.clientEntries) ? query.clientEntries : []
-  return [...new Set(values.filter(value => typeof value === 'string' && value.length <= 400))].slice(0, 160)
+function clearSourceCache() {
+  sourceCache.clear()
+  sourceCacheGraphRev = ''
+  if (sourceCacheTimer) clearTimeout(sourceCacheTimer)
+  sourceCacheTimer = undefined
 }
 
-async function packageDetails(authorizedPackages, packageName) {
-  validatePackageName(packageName)
-  const candidate = authorizedPackages.get(packageName)
-  if (!candidate || candidate.ownerType !== 'plugin') throw new Error('package is not an active UI candidate')
-  return candidate
+function releaseSourceCacheWhenIdle() {
+  if (sourceCacheTimer) clearTimeout(sourceCacheTimer)
+  sourceCacheTimer = setTimeout(clearSourceCache, SOURCE_CACHE_IDLE_MS)
+  sourceCacheTimer.unref?.()
 }
 
 async function inspectPackage(candidate) {
-  const cached = sourceCache.get(candidate.root)
-  if (cached && Date.now() - cached.createdAt < SOURCE_CACHE_TTL) return cached.value
+  if (sourceCacheGraphRev !== candidate.graphRev) {
+    sourceCache.clear()
+    sourceCacheGraphRev = candidate.graphRev
+  }
+  const key = `${candidate.packageName}\0${candidate.rev}\0${candidate.files.join('\0')}`
+  const cached = sourceCache.get(key)
+  if (cached) return cached
   const files = []
   for (const file of candidate.files) {
     let source
@@ -95,94 +88,80 @@ async function inspectPackage(candidate) {
     repositoryUrl: repositoryUrl(candidate.manifest),
     files,
   }
-  sourceCache.set(candidate.root, { createdAt: Date.now(), value })
+  sourceCache.set(key, value)
   return value
 }
 
-async function runtimePackages(ctx, profileDir, query) {
-  return discoverRuntimeCandidates(profileDir, {
-    clientEntries: clientEntries(query),
-    loaderEntries: loaderEntriesFromContext(ctx),
-    inspectorName: name,
-  })
-}
-
-async function resolveOwnership(ctx, profileDir, query, authorizedPackages) {
-  const candidates = await runtimePackages(ctx, profileDir, query)
+async function resolveOwnership(ctx, query) {
+  const candidates = await discoverRuntimeCandidates(ctx.clientModules, { inspectorName: name })
   const packages = await Promise.all(candidates.map(inspectPackage))
-  authorizedPackages.clear()
-  for (const candidate of candidates) {
-    if (isDshPackage(candidate.packageName)) continue
-    authorizedPackages.set(candidate.packageName, {
-      ownerType: 'plugin',
-      root: candidate.root,
-      repositoryUrl: repositoryUrl(candidate.manifest),
-    })
-  }
+  releaseSourceCacheWhenIdle()
   const outcome = scorePackages(packages, extractSignals(query))
-  return { query: { ...query, clientEntries: undefined, runtimeRegistrations: undefined }, certainty: outcome.certainty, reasons: outcome.reasons, results: outcome.results.slice(0, MAX_RESULTS) }
+  const sanitizedQuery = { ...query }
+  delete sanitizedQuery.clientEntries
+  delete sanitizedQuery.runtimeRegistrations
+  return {
+    query: sanitizedQuery,
+    certainty: outcome.certainty,
+    reasons: outcome.reasons,
+    results: outcome.results.slice(0, MAX_RESULTS),
+  }
 }
 
-async function activeProfileDirectory(baseUrl) {
-  const candidate = profileDirectoryFromBaseUrl(baseUrl)
-  const manifest = JSON.parse(await readFile(join(candidate, 'package.json'), 'utf8'))
-  if (manifest.dsh?.profile?.bundles?.includes(name) || manifest.dependencies?.[name] !== undefined) return candidate
-  throw new Error('the active DSH profile does not declare this plugin')
+async function activePlugin(ctx, packageName) {
+  const candidate = await runtimeCandidateByName(ctx.clientModules, packageName, { inspectorName: name })
+  if (isDshPackage(candidate.packageName)) throw new Error('DSH packages cannot be opened through the plugin inspector')
+  return {
+    root: candidate.root,
+    repositoryUrl: repositoryUrl(candidate.manifest),
+  }
+}
+
+function failure(error) {
+  return {
+    ok: false,
+    error: {
+      code: 'bad-request',
+      message: error instanceof Error ? error.message : String(error),
+    },
+  }
+}
+
+async function handleRpc(ctx, endpoint, payload) {
+  try {
+    if (endpoint === 'resolve') {
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('invalid resolve request')
+      return { ok: true, value: await resolveOwnership(ctx, payload) }
+    }
+    if (endpoint === 'open-folder') {
+      const details = await activePlugin(ctx, string(payload?.packageName, 200))
+      await revealDirectory(details.root)
+      return { ok: true, value: { ok: true } }
+    }
+    if (endpoint === 'open-repository') {
+      const details = await activePlugin(ctx, string(payload?.packageName, 200))
+      if (!details.repositoryUrl) throw new Error('插件没有可用的源仓库网页地址')
+      await openExternal(details.repositoryUrl)
+      return { ok: true, value: { ok: true, url: details.repositoryUrl } }
+    }
+    throw new Error(`unknown inspector endpoint: ${endpoint}`)
+  } catch (error) {
+    ctx.logger?.warn?.(`[${name}] ${endpoint} failed: ${String(error)}`)
+    return failure(error)
+  }
 }
 
 export function apply(ctx) {
-  const authorizedPackages = new Map()
   ctx.inject(['settings'], settingsCtx => {
     settingsCtx.settings.register(SETTINGS_NAMESPACE, SettingsSchema)
   })
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact',
-    path: PATH,
-    handler: async (req, res) => {
-      if (req.method !== 'POST') return json(res, 405, { error: 'method-not-allowed' })
-      try {
-        const query = await bodyOf(req)
-        const profileDir = await activeProfileDirectory(ctx.baseUrl)
-        return json(res, 200, await resolveOwnership(ctx, profileDir, query, authorizedPackages))
-      } catch (error) {
-        ctx.logger?.warn?.(`[${name}] resolve failed: ${String(error)}`)
-        return json(res, 400, { error: 'resolve-failed', message: error instanceof Error ? error.message : String(error) })
-      }
-    },
-  }), `${name}: source lookup route`)
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact',
-    path: OPEN_FOLDER_PATH,
-    handler: async (req, res) => {
-      if (req.method !== 'POST') return json(res, 405, { error: 'method-not-allowed' })
-      try {
-        const query = await bodyOf(req)
-        const profileDir = await activeProfileDirectory(ctx.baseUrl)
-        const details = await packageDetails(authorizedPackages, string(query.packageName, 200))
-        await revealDirectory(details.root)
-        return json(res, 200, { ok: true })
-      } catch (error) {
-        ctx.logger?.warn?.(`[${name}] open folder failed: ${String(error)}`)
-        return json(res, 400, { error: 'open-folder-failed', message: error instanceof Error ? error.message : String(error) })
-      }
-    },
-  }), `${name}: open plugin folder route`)
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'exact',
-    path: OPEN_REPOSITORY_PATH,
-    handler: async (req, res) => {
-      if (req.method !== 'POST') return json(res, 405, { error: 'method-not-allowed' })
-      try {
-        const query = await bodyOf(req)
-        const profileDir = await activeProfileDirectory(ctx.baseUrl)
-        const details = await packageDetails(authorizedPackages, string(query.packageName, 200))
-        if (!details.repositoryUrl) return json(res, 404, { error: 'repository-not-found', message: '插件没有可用的源仓库网页地址' })
-        await openExternal(details.repositoryUrl)
-        return json(res, 200, { ok: true, url: details.repositoryUrl })
-      } catch (error) {
-        ctx.logger?.warn?.(`[${name}] open repository failed: ${String(error)}`)
-        return json(res, 400, { error: 'open-repository-failed', message: error instanceof Error ? error.message : String(error) })
-      }
-    },
-  }), `${name}: open repository route`)
+  ctx.effect(
+    () => ctx.connection.rpc.handle(
+      RPC_CHANNEL,
+      (endpoint, payload) => handleRpc(ctx, endpoint, payload),
+      { authority: 'loopback' },
+    ),
+    `${name}: loopback RPC`,
+  )
+  ctx.effect(() => clearSourceCache, `${name}: source cache`)
 }

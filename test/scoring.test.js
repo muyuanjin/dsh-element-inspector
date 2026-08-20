@@ -103,6 +103,16 @@ test('filters generated mixed-case IDs and React useId values', () => {
   assert.deepEqual(signals, [])
 })
 
+test('bounds browser-supplied ancestor and attribute collections', () => {
+  const ancestors = Array.from({ length: 20 }, (_, index) => ({ id: `ancestor-marker-${index}` }))
+  const attrs = Object.fromEntries(Array.from({ length: 40 }, (_, index) => [`data-marker-${index}-name`, `marker-value-${index}`]))
+  const signals = extractSignals({ ancestors, attrs })
+  assert.equal(signals.some(signal => signal.value === 'ancestor-marker-6'), true)
+  assert.equal(signals.some(signal => signal.value === 'ancestor-marker-7'), false)
+  assert.equal(signals.some(signal => signal.value === 'marker-value-31'), true)
+  assert.equal(signals.some(signal => signal.value === 'marker-value-32'), false)
+})
+
 test('keeps one unique class as a candidate instead of confirming it', () => {
   const outcome = scoreEvidence([pkg('plugin-alpha', 'alpha-toolbar-action')], { classes: 'alpha-toolbar-action' })
   assert.equal(outcome.certainty, 'candidate')

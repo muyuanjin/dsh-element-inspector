@@ -2216,6 +2216,7 @@ ${caption}${tableContent}
     id: "dsh-element-inspector",
     factory: (require2) => {
       const module = { exports: {} };
+      const React = require2("react");
       const STYLE_ID = "dsh-element-inspector-style";
       const ROOT_ID = "dsh-element-inspector-root";
       const LEGACY_STORAGE_KEY = "dsh-element-inspector:v2";
@@ -2304,6 +2305,11 @@ ${caption}${tableContent}
         const key = event.code?.startsWith("Key") ? event.code.slice(3).toUpperCase() : event.code?.startsWith("Digit") ? event.code.slice(5) : event.key;
         return [...modifiers, key].join("+");
       }
+      async function callHost(ctx, endpoint, payload, signal) {
+        const result = await ctx.connection.rpc.call("/dsh-element-inspector", endpoint, payload, signal);
+        if (!result.ok) throw new Error(result.error?.message || "DSH Host \u62D2\u7EDD\u4E86\u8BF7\u6C42");
+        return result.value;
+      }
       function nthOfType2(element) {
         let index = 1;
         for (let sibling = element.previousElementSibling; sibling; sibling = sibling.previousElementSibling) if (sibling.tagName === element.tagName) index += 1;
@@ -2322,8 +2328,7 @@ ${caption}${tableContent}
           for (const attr of node.attributes ?? []) if (/^(data-|aria-|role$)/.test(attr.name)) ancestorAttrs[attr.name] = attr.value;
           ancestors.push({ id: node.id || "", classes: typeof node.className === "string" ? node.className.slice(0, 240) : "", attrs: ancestorAttrs, tag: node.tagName || "", nth: nthOfType2(node) });
         }
-        const clientEntries = [...new Set((window.__DSH_BOOT__?.entries ?? []).map((entry) => typeof entry?.id === "string" ? entry.id.slice(0, 200) : "").filter(Boolean))].slice(0, 120);
-        return { text: normalizeText(target.innerText || target.textContent), aria: target.getAttribute("aria-label") || "", id: target.id || "", classes: typeof target.className === "string" ? target.className.slice(0, 240) : "", role: target.getAttribute("role") || "", tag: target.tagName || "", nth: nthOfType2(target), attrs, ancestors, owner, clientEntries, runtimeRegistrations: runtimeRegistrations(target, slots) };
+        return { text: normalizeText(target.innerText || target.textContent), aria: target.getAttribute("aria-label") || "", id: target.id || "", classes: typeof target.className === "string" ? target.className.slice(0, 240) : "", role: target.getAttribute("role") || "", tag: target.tagName || "", nth: nthOfType2(target), attrs, ancestors, owner, runtimeRegistrations: runtimeRegistrations(target, slots) };
       }
       async function writeText(text) {
         try {
@@ -2363,6 +2368,7 @@ ${caption}${tableContent}
       function apply(ctx) {
         style();
         const preferenceScope = ctx.settingsScope.bind({ namespace: SETTINGS_NAMESPACE });
+        const h = React.createElement;
         let active = false;
         let current;
         let root2;
@@ -2375,8 +2381,118 @@ ${caption}${tableContent}
         let previousView = "";
         let captureHotkey = false;
         let hideScheduled = false;
+        let settingsCardCapturing = false;
         let noticeTimer;
         const hiddenOriginalDisplay = /* @__PURE__ */ new WeakMap();
+        const cardStyles = {
+          card: { padding: "20px", border: "1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))", borderRadius: "8px", background: "var(--dsw-alias-bg-layer-1,#fff)", color: "var(--dsw-alias-label-primary,#17181c)" },
+          title: { margin: "0", fontSize: "16px", fontWeight: 600, lineHeight: "24px" },
+          description: { margin: "4px 0 18px", color: "var(--dsw-alias-label-secondary,#545860)", fontSize: "13px", lineHeight: "20px" },
+          row: { display: "flex", alignItems: "center", gap: "12px", minHeight: "52px", borderTop: "1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))" },
+          main: { flex: 1, minWidth: 0 },
+          label: { fontSize: "14px", fontWeight: 500, lineHeight: "20px" },
+          detail: { overflow: "hidden", color: "var(--dsw-alias-label-tertiary,#74777d)", fontSize: "12px", lineHeight: "18px", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+          key: { minWidth: "52px", padding: "3px 8px", border: "1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))", borderRadius: "6px", fontFamily: "Consolas,monospace", fontSize: "12px", textAlign: "center" },
+          button: { minHeight: "32px", padding: "0 12px", border: "1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))", borderRadius: "6px", background: "transparent", color: "inherit", cursor: "pointer" },
+          danger: { minHeight: "30px", width: "30px", padding: 0, border: 0, borderRadius: "6px", background: "transparent", color: "var(--dsw-alias-state-error-primary,#c5221f)", cursor: "pointer", fontSize: "18px" },
+          footer: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", marginTop: "16px" },
+          status: { minHeight: "18px", color: "var(--dsw-alias-label-tertiary,#74777d)", fontSize: "12px", lineHeight: "18px" }
+        };
+        function InspectorSettingsCard() {
+          const subscribe = React.useCallback((listener) => preferenceScope.subscribe(listener), []);
+          const getSnapshot = React.useCallback(() => preferenceScope.getSnapshot(), []);
+          const snapshot = React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+          const value = normalizePrefs(snapshot.value);
+          const writable = snapshot.status === "ready" && snapshot.writable;
+          const [recording, setRecording] = React.useState(false);
+          const [status, setStatus] = React.useState("");
+          const [saving, setSaving] = React.useState(false);
+          const savingRef = React.useRef(false);
+          const saveCardPreference = async (field, nextValue, successMessage) => {
+            if (savingRef.current) return false;
+            const before = preferenceScope.getSnapshot();
+            if (before.status !== "ready" || !before.writable) {
+              setStatus(before.status === "loading" ? "\u8BBE\u7F6E\u4ECD\u5728\u540C\u6B65\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5" : "\u5F53\u524D DSH \u8BBE\u7F6E\u4E0D\u53EF\u5199");
+              return false;
+            }
+            savingRef.current = true;
+            setSaving(true);
+            try {
+              await preferenceScope.set(field, nextValue);
+              const accepted = preferenceScope.getSnapshot();
+              const persisted = accepted.status === "ready" && accepted.writable && accepted.revision !== before.revision && JSON.stringify(accepted.value?.[field]) === JSON.stringify(nextValue);
+              setStatus(persisted ? successMessage : "\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25\uFF0C\u5DF2\u6062\u590D DSH \u4E2D\u7684\u503C");
+              return persisted;
+            } catch (error) {
+              setStatus(`\u4FDD\u5B58\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`);
+              return false;
+            } finally {
+              savingRef.current = false;
+              setSaving(false);
+            }
+          };
+          React.useEffect(() => {
+            if (!recording) return void 0;
+            settingsCardCapturing = true;
+            const capture = (event) => {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
+              if (event.key === "Escape") {
+                setRecording(false);
+                return;
+              }
+              const hotkey = eventHotkey(event);
+              setRecording(false);
+              void saveCardPreference("hotkey", hotkey, `\u5FEB\u6377\u952E\u5DF2\u66F4\u65B0\u4E3A ${hotkey}`);
+            };
+            document.addEventListener("keydown", capture, true);
+            return () => {
+              settingsCardCapturing = false;
+              document.removeEventListener("keydown", capture, true);
+            };
+          }, [recording]);
+          const removeHidden = (rule) => {
+            const latest = normalizePrefs(preferenceScope.getSnapshot().value).hidden;
+            const target = JSON.stringify(rule);
+            const index = latest.findIndex((item) => JSON.stringify(item) === target);
+            if (index === -1) return;
+            const hidden = latest.filter((_, current2) => current2 !== index);
+            void saveCardPreference("hidden", hidden, "\u9690\u85CF\u89C4\u5219\u5DF2\u79FB\u9664");
+          };
+          const clearHidden = () => {
+            void saveCardPreference("hidden", [], "\u9690\u85CF\u89C4\u5219\u5DF2\u6E05\u7A7A");
+          };
+          return h(
+            "li",
+            { style: cardStyles.card, "data-dsh-element-inspector-settings-card": "" },
+            h("h3", { style: cardStyles.title }, "\u5143\u7D20\u68C0\u67E5\u5668"),
+            h("p", { style: cardStyles.description }, "\u7BA1\u7406\u5143\u7D20\u62FE\u53D6\u5FEB\u6377\u952E\u4E0E\u5F53\u524D profile \u7684\u9690\u85CF\u89C4\u5219\u3002"),
+            h(
+              "div",
+              { style: cardStyles.row },
+              h("div", { style: cardStyles.main }, h("div", { style: cardStyles.label }, "\u5524\u8D77\u5FEB\u6377\u952E"), h("div", { style: cardStyles.detail }, "\u5FEB\u901F\u6309\u4E24\u6B21\u4ECD\u53EF\u6253\u5F00\u68C0\u67E5\u5668\u8BBE\u7F6E")),
+              h("span", { style: cardStyles.key }, value.hotkey),
+              h("button", { type: "button", style: cardStyles.button, disabled: !writable || saving, onClick: () => setRecording(true) }, recording ? "\u8BF7\u6309\u952E\u2026" : "\u66F4\u6539")
+            ),
+            ...value.hidden.map((rule, index) => h(
+              "div",
+              { style: cardStyles.row, key: `${index}:${rule.text || rule.id || rule.tag}` },
+              h("div", { style: cardStyles.main }, h("div", { style: cardStyles.label }, rule.text || rule.id || rule.classes?.join(" ") || "\u65E0\u6587\u672C\u5143\u7D20"), h("div", { style: cardStyles.detail }, `${rule.tag || "*"}${rule.id ? ` #${rule.id}` : ""}`)),
+              h("button", { type: "button", style: cardStyles.danger, disabled: !writable || saving, title: "\u53D6\u6D88\u9690\u85CF", "aria-label": "\u53D6\u6D88\u9690\u85CF", onClick: () => removeHidden(rule) }, "\xD7")
+            )),
+            h(
+              "div",
+              { style: cardStyles.footer },
+              h("span", { style: cardStyles.status, role: "status" }, status || (snapshot.status === "loading" ? "\u6B63\u5728\u540C\u6B65\u8BBE\u7F6E" : `${value.hidden.length} \u6761\u9690\u85CF\u89C4\u5219`)),
+              value.hidden.length ? h("button", { type: "button", style: cardStyles.button, disabled: !writable || saving, onClick: clearHidden }, "\u5168\u90E8\u53D6\u6D88\u9690\u85CF") : null
+            )
+          );
+        }
+        ctx.slots.inject("settings.plugin.item", () => ctx.slots.register({
+          name: "settings.plugin.item",
+          key: SETTINGS_NAMESPACE
+        }, InspectorSettingsCard));
         const close = () => {
           active = false;
           current = void 0;
@@ -2491,8 +2607,7 @@ ${caption}${tableContent}
           selectedInfo = info;
           render(panel("\u6B63\u5728\u5206\u6790", '<div class="dei-summary"><p>\u6B63\u5728\u68C0\u67E5\u5143\u7D20\u6807\u8BB0\u4E0E\u5F53\u524D profile \u7684 DSH \u53CA\u63D2\u4EF6\u6E90\u7801\u2026</p></div>'));
           try {
-            const response = await fetch("/__dsh-element-inspector/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(info) });
-            const data = await response.json();
+            const data = await callHost(ctx, "resolve", info);
             const results = data.results || [];
             const hits = results.map((hit, index) => {
               const ownerName = hit.ownerName || hit.packageName;
@@ -2590,19 +2705,17 @@ ${caption}${tableContent}
           if (!button || !root2?.contains(button)) return;
           event.preventDefault();
           event.stopPropagation();
-          const endpoint = button.classList.contains("dei-open-folder") ? "/__dsh-element-inspector/open-folder" : "/__dsh-element-inspector/open-repository";
+          const endpoint = button.classList.contains("dei-open-folder") ? "open-folder" : "open-repository";
           button.disabled = true;
           const originalLabel = button.textContent;
           button.textContent = "\u6B63\u5728\u6253\u5F00\u2026";
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 5e3);
           try {
-            const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ packageName: button.dataset.package }), signal: controller.signal });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message || `\u8BF7\u6C42\u5931\u8D25 (${response.status})`);
+            await callHost(ctx, endpoint, { packageName: button.dataset.package }, controller.signal);
             button.disabled = false;
             button.textContent = originalLabel;
-            notify(endpoint.endsWith("open-folder") ? "\u63D2\u4EF6\u6587\u4EF6\u5939\u5DF2\u5728\u6587\u4EF6\u7BA1\u7406\u5668\u4E2D\u6253\u5F00" : "\u6E90\u4ED3\u5E93\u5DF2\u5728\u6D4F\u89C8\u5668\u4E2D\u6253\u5F00");
+            notify(endpoint === "open-folder" ? "\u63D2\u4EF6\u6587\u4EF6\u5939\u5DF2\u5728\u6587\u4EF6\u7BA1\u7406\u5668\u4E2D\u6253\u5F00" : "\u6E90\u4ED3\u5E93\u5DF2\u5728\u6D4F\u89C8\u5668\u4E2D\u6253\u5F00");
           } catch (error) {
             button.disabled = false;
             button.textContent = originalLabel;
@@ -2616,6 +2729,7 @@ ${caption}${tableContent}
           return pick(event);
         };
         const key = (event) => {
+          if (settingsCardCapturing) return;
           if (captureHotkey) {
             if (event.key === "Escape") {
               captureHotkey = false;
@@ -2682,7 +2796,7 @@ ${caption}${tableContent}
           document.getElementById(STYLE_ID)?.remove();
         }, "dsh-element-inspector: listeners");
       }
-      module.exports = { apply, inject: ["settingsScope", "connection", "remote", "slots"] };
+      module.exports = { apply, inject: ["settingsScope", "connection", "slots"] };
       return module.exports;
     }
   });

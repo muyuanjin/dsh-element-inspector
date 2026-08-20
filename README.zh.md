@@ -2,6 +2,8 @@
 
 [English](README.md) | 简体中文
 
+![dsh-element-inspector 横幅](assets/dsh-element-inspector-banner.png)
+
 点选 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 界面元素，识别它来自 DSH 官方界面还是某个已安装插件，并导出或隐藏所选元素。
 
 > [!NOTE]
@@ -10,7 +12,7 @@
 > [!IMPORTANT]
 > 归属结果来自本地证据评分检测算法，不是 DSH 或插件提供的权威归属声明。“已确认”仅表示当前证据达到算法阈值，不保证绝对正确，也不代表插件可信、安全或由某个作者签名发布。
 
-按下 `F1`，指向元素并单击即可检查。插件会将稳定的 DOM 标记与当前运行时中 DSH 及插件模块的客户端入口文件进行比对，并展示最强候选及其判断依据。
+按下 `F1`，指向元素并单击即可检查。插件会将稳定的 DOM 标记与 DSH 当前实际提供给页面的客户端 bundle 进行比对，并展示最强候选及其判断依据。
 
 ![元素选择与归属识别演示](assets/dsh-element-inspector-demo.gif)
 
@@ -22,7 +24,7 @@
 - **快速导航**：打开已安装插件目录，或打开其 `package.json` 声明的源仓库。
 - **元素导出**：在本地生成 PNG 截图、复制 `outerHTML`，或转换为 GitHub Flavored Markdown。
 - **持久隐藏**：隐藏所选元素，并支持逐条恢复或清空全部隐藏规则。
-- **自定义快捷键**：默认使用 `F1`；快速按两次可打开设置并录入新快捷键。
+- **自定义快捷键**：默认使用 `F1`；快速按两次可打开快捷弹窗，也可在“设置 → 插件配置”中管理快捷键和隐藏规则。
 
 ## 界面
 
@@ -38,7 +40,7 @@
 | DSH 平台 | Web、Desktop |
 | 操作系统 | Windows、Linux、macOS |
 
-插件通过 DSH 提供的 `ctx.baseUrl` 定位当前 profile，并沿 Node.js 模块搜索路径解析插件。它支持常规 npm/pnpm 安装、本地链接和 workspace 提升，不依赖固定的用户目录、盘符、Desktop 数据目录或进程工作目录。
+插件以 DSH Host 的 `clientModules.graph()` 和 `clientPath()` 为运行时事实源，因此常规 npm/pnpm 安装、本地链接、workspace 提升和动态 Loader Web 插件都按 DSH 的实际组合结果处理，不依赖固定的用户目录、盘符、Desktop 数据目录或进程工作目录。
 
 ## 安装
 
@@ -83,21 +85,21 @@ profile 会继续链接到该源码目录。修改客户端代码后，请重新
 2. 移动鼠标预览元素，单击确认；按 `Esc` 可取消。
 3. 查看首选归属，并展开其他候选归属的判断依据。
 4. 截图、复制 HTML 或 Markdown、打开命中插件的位置，或者隐藏该元素。
-5. 快速按两次快捷键，修改快捷键或管理隐藏规则。
+5. 快速按两次快捷键，或打开“设置 → 插件配置”，修改快捷键或管理隐藏规则。
 
 浏览器允许写入图片时，截图会复制到系统剪贴板；否则自动下载为 PNG。HTML 和 Markdown 会写入剪贴板。截图和格式转换均在本地完成。
 
 ## 归属判断原理
 
-客户端从所选元素及最多七层祖先中收集稳定信号，包括 ID、class、`data-*` 属性、ARIA 标签、文本和 React owner 名称。对于由 DSH shell 代为渲染的设置导航等控件，算法还会沿 React key/组件与当前 Cordis slot registration 建立联系，再用实际注册组件的函数源码确认来源。Host 会解析当前浏览器 Boot module 与活动 Cordis Loader entry，并扫描可解析包声明的客户端入口文件及约定位置的客户端 CSS。
+客户端从所选元素及最多七层祖先中收集稳定信号，包括 ID、class、`data-*` 属性、ARIA 标签、文本和 React owner 名称。对于由 DSH shell 代为渲染的设置导航等控件，算法还会沿 React key/组件与当前 Cordis slot registration 建立联系，再用实际注册组件的函数源码确认来源。Host 只接受 `clientModules.graph()` 中当前实际组合的 Web entry，并只扫描 `clientPath(id)` 指向的已服务 bundle；不会猜测包内入口或额外扫描约定位置的 CSS。
 
-DSH 官方包会按内置身份聚合为一个宿主候选，其他活动运行时模块仍按插件包独立参与比较。浏览器 Boot entry 与活动 Cordis Loader entry 可覆盖 npm/pnpm 安装、链接、workspace、`file:` 来源，以及能解析到 package root 和客户端入口的动态加载项；已禁用、纯 Host 和检查器自身 entry 会被排除。运行时注册源码、唯一稳定标记和距离更近的归属边界权重更高；共享、自动生成或过于通用的标记会被降权。只有独占的运行时注册源码、稳定 ID/测试标记，或多个相互独立的独占标记，才会标记为“已确认”。仅命中较远的 DSH 外层容器不会判为官方，证据不足时返回候选或无法确认。
+DSH 官方包会按内置身份聚合为一个宿主候选，其他活动运行时模块仍按插件包独立参与比较。服务端权威图会自动排除已禁用、纯 Host、未加载和检查器自身 entry；打开插件目录或仓库时也会重新对照当前图、bundle 路径和 manifest 包名，不沿用旧识别结果授权。运行时注册源码、唯一稳定标记和距离更近的归属边界权重更高；共享、自动生成或过于通用的标记会被降权。只有独占的运行时注册源码、稳定 ID/测试标记，或多个相互独立的独占标记，才会标记为“已确认”。仅命中较远的 DSH 外层容器不会判为官方，证据不足时返回候选或无法确认。
 
 ## 检测局限
 
 - 这是启发式归属检测，不是代码签名、调用链追踪或 DSH 官方审计接口。即使显示“已确认”，插件包装、运行时改写或多个来源共同组成一个控件时仍可能归错层级。
-- 只比较当前运行时中活动且能解析到本地 package root 的模块。未加载、已禁用、纯 Host、远程脚本、无法解析来源的动态代码，以及未包含在声明入口或约定 CSS 中的懒加载文件可能不会成为候选。
-- 单个客户端入口文件超过 1 MB 时不会扫描。源码刚被 HMR 或外部工具替换后，短时间内也可能命中缓存中的旧内容。
+- 只比较 DSH 当前客户端模块图中、bundle 能映射到同名本地 package manifest 的模块。未加载、已禁用、纯 Host、远程脚本，以及只有 slot registration 却无法映射到客户端模块 entry 的动态代码不会成为包候选。
+- 单个实际客户端 bundle 超过 1 MB 时不会扫描。源码缓存按 DSH graph revision 和 entry revision 失效；绕过 DSH HMR 直接覆写文件而未更新 revision 时，仍可能读取旧缓存直到图发生变化或 Host 重启。
 - shell 代渲染控件的溯源依赖当前 DSH slots inspection API 和 React fiber/key 结构。DSH 或 React 升级后，这条证据链可能失效，算法会退回 DOM/源码标记，结果可能从“已确认”降为候选或无法确认。
 - 文本、class、`data-*` 名称和函数源码都可能被多个插件复用或复制。算法会尽量保留多个候选，但不能在没有独占证据时推断真实作者。
 - iframe、闭合 Shadow DOM、canvas 绘制内容和 CSS 伪元素不是当前文档中的普通可选 DOM 节点，通常只能检测其外层容器或无法检测。
@@ -106,7 +108,8 @@ DSH 官方包会按内置身份聚合为一个宿主候选，其他活动运行�
 
 ## 隐私与权限
 
-- 只读取当前浏览器/Cordis 运行时中活动 DSH 及插件模块的客户端入口文件；已禁用和纯 Host entry 会被排除。
+- 只读取 DSH Host 当前客户端模块图中 entry 的实际已服务 bundle；已禁用、未加载和纯 Host entry 会被排除。
+- 识别、打开目录和打开仓库通过 DSH Connection 的 loopback-only RPC 执行，沿用官方 Host、Origin、跨站请求、JSON media type 与流式请求体限制。
 - 只通过系统文件管理器打开已验证的插件安装目录；源仓库地址来自对应插件的 `package.json`。
 - 将导出的 HTML、Markdown 或 PNG 写入剪贴板；截图无法写入剪贴板时仅在本地下载 PNG。
 - 通过 DSH 官方设置服务保存快捷键和隐藏规则，并在浏览器本地保留启动缓存；旧版浏览器设置会在条件允许时迁移一次。
@@ -142,7 +145,7 @@ pnpm run test
 pnpm run build
 ```
 
-测试覆盖归属评分、跨平台包解析、隐藏规则和元素导出辅助函数；构建命令使用 esbuild 重新生成浏览器 bundle。
+测试覆盖归属评分、权威客户端模块发现、真实 Cordis + Connection 路由组合及其信任栅栏、跨平台包解析、设置契约、隐藏规则和元素导出辅助函数；构建命令使用 esbuild 重新生成浏览器 bundle。
 
 ## 许可证
 

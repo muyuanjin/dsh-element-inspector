@@ -6,6 +6,7 @@ window.__ModuleLoader__.load({
   id: 'dsh-element-inspector',
   factory: (require) => {
     const module = { exports: {} }
+    const React = require('react')
     const STYLE_ID = 'dsh-element-inspector-style'
     const ROOT_ID = 'dsh-element-inspector-root'
     const LEGACY_STORAGE_KEY = 'dsh-element-inspector:v2'
@@ -85,6 +86,11 @@ window.__ModuleLoader__.load({
       const key = event.code?.startsWith('Key') ? event.code.slice(3).toUpperCase() : event.code?.startsWith('Digit') ? event.code.slice(5) : event.key
       return [...modifiers, key].join('+')
     }
+    async function callHost(ctx, endpoint, payload, signal) {
+      const result = await ctx.connection.rpc.call('/dsh-element-inspector', endpoint, payload, signal)
+      if (!result.ok) throw new Error(result.error?.message || 'DSH Host 拒绝了请求')
+      return result.value
+    }
     function nthOfType(element) {
       let index = 1
       for (let sibling = element.previousElementSibling; sibling; sibling = sibling.previousElementSibling) if (sibling.tagName === element.tagName) index += 1
@@ -104,8 +110,7 @@ window.__ModuleLoader__.load({
         for (const attr of node.attributes ?? []) if (/^(data-|aria-|role$)/.test(attr.name)) ancestorAttrs[attr.name] = attr.value
         ancestors.push({ id: node.id || '', classes: typeof node.className === 'string' ? node.className.slice(0, 240) : '', attrs: ancestorAttrs, tag: node.tagName || '', nth: nthOfType(node) })
       }
-      const clientEntries = [...new Set((window.__DSH_BOOT__?.entries ?? []).map(entry => typeof entry?.id === 'string' ? entry.id.slice(0, 200) : '').filter(Boolean))].slice(0, 120)
-      return { text: normalizeText(target.innerText || target.textContent), aria: target.getAttribute('aria-label') || '', id: target.id || '', classes: typeof target.className === 'string' ? target.className.slice(0, 240) : '', role: target.getAttribute('role') || '', tag: target.tagName || '', nth: nthOfType(target), attrs, ancestors, owner, clientEntries, runtimeRegistrations: runtimeRegistrations(target, slots) }
+      return { text: normalizeText(target.innerText || target.textContent), aria: target.getAttribute('aria-label') || '', id: target.id || '', classes: typeof target.className === 'string' ? target.className.slice(0, 240) : '', role: target.getAttribute('role') || '', tag: target.tagName || '', nth: nthOfType(target), attrs, ancestors, owner, runtimeRegistrations: runtimeRegistrations(target, slots) }
     }
 
     async function writeText(text) {
@@ -146,6 +151,7 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       style()
       const preferenceScope = ctx.settingsScope.bind({ namespace: SETTINGS_NAMESPACE })
+      const h = React.createElement
       let active = false
       let current
       let root
@@ -158,8 +164,113 @@ window.__ModuleLoader__.load({
       let previousView = ''
       let captureHotkey = false
       let hideScheduled = false
+      let settingsCardCapturing = false
       let noticeTimer
       const hiddenOriginalDisplay = new WeakMap()
+      const cardStyles = {
+        card: { padding: '20px', border: '1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1,#fff)', color: 'var(--dsw-alias-label-primary,#17181c)' },
+        title: { margin: '0', fontSize: '16px', fontWeight: 600, lineHeight: '24px' },
+        description: { margin: '4px 0 18px', color: 'var(--dsw-alias-label-secondary,#545860)', fontSize: '13px', lineHeight: '20px' },
+        row: { display: 'flex', alignItems: 'center', gap: '12px', minHeight: '52px', borderTop: '1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))' },
+        main: { flex: 1, minWidth: 0 },
+        label: { fontSize: '14px', fontWeight: 500, lineHeight: '20px' },
+        detail: { overflow: 'hidden', color: 'var(--dsw-alias-label-tertiary,#74777d)', fontSize: '12px', lineHeight: '18px', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+        key: { minWidth: '52px', padding: '3px 8px', border: '1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))', borderRadius: '6px', fontFamily: 'Consolas,monospace', fontSize: '12px', textAlign: 'center' },
+        button: { minHeight: '32px', padding: '0 12px', border: '1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))', borderRadius: '6px', background: 'transparent', color: 'inherit', cursor: 'pointer' },
+        danger: { minHeight: '30px', width: '30px', padding: 0, border: 0, borderRadius: '6px', background: 'transparent', color: 'var(--dsw-alias-state-error-primary,#c5221f)', cursor: 'pointer', fontSize: '18px' },
+        footer: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginTop: '16px' },
+        status: { minHeight: '18px', color: 'var(--dsw-alias-label-tertiary,#74777d)', fontSize: '12px', lineHeight: '18px' },
+      }
+      function InspectorSettingsCard() {
+        const subscribe = React.useCallback(listener => preferenceScope.subscribe(listener), [])
+        const getSnapshot = React.useCallback(() => preferenceScope.getSnapshot(), [])
+        const snapshot = React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+        const value = normalizePrefs(snapshot.value)
+        const writable = snapshot.status === 'ready' && snapshot.writable
+        const [recording, setRecording] = React.useState(false)
+        const [status, setStatus] = React.useState('')
+        const [saving, setSaving] = React.useState(false)
+        const savingRef = React.useRef(false)
+        const saveCardPreference = async (field, nextValue, successMessage) => {
+          if (savingRef.current) return false
+          const before = preferenceScope.getSnapshot()
+          if (before.status !== 'ready' || !before.writable) {
+            setStatus(before.status === 'loading' ? '设置仍在同步，请稍后重试' : '当前 DSH 设置不可写')
+            return false
+          }
+          savingRef.current = true
+          setSaving(true)
+          try {
+            await preferenceScope.set(field, nextValue)
+            const accepted = preferenceScope.getSnapshot()
+            const persisted = accepted.status === 'ready'
+              && accepted.writable
+              && accepted.revision !== before.revision
+              && JSON.stringify(accepted.value?.[field]) === JSON.stringify(nextValue)
+            setStatus(persisted ? successMessage : '设置保存失败，已恢复 DSH 中的值')
+            return persisted
+          } catch (error) {
+            setStatus(`保存失败：${error instanceof Error ? error.message : String(error)}`)
+            return false
+          } finally {
+            savingRef.current = false
+            setSaving(false)
+          }
+        }
+        React.useEffect(() => {
+          if (!recording) return undefined
+          settingsCardCapturing = true
+          const capture = event => {
+            event.preventDefault()
+            event.stopImmediatePropagation()
+            if (['Control', 'Shift', 'Alt', 'Meta'].includes(event.key)) return
+            if (event.key === 'Escape') {
+              setRecording(false)
+              return
+            }
+            const hotkey = eventHotkey(event)
+            setRecording(false)
+            void saveCardPreference('hotkey', hotkey, `快捷键已更新为 ${hotkey}`)
+          }
+          document.addEventListener('keydown', capture, true)
+          return () => {
+            settingsCardCapturing = false
+            document.removeEventListener('keydown', capture, true)
+          }
+        }, [recording])
+        const removeHidden = rule => {
+          const latest = normalizePrefs(preferenceScope.getSnapshot().value).hidden
+          const target = JSON.stringify(rule)
+          const index = latest.findIndex(item => JSON.stringify(item) === target)
+          if (index === -1) return
+          const hidden = latest.filter((_, current) => current !== index)
+          void saveCardPreference('hidden', hidden, '隐藏规则已移除')
+        }
+        const clearHidden = () => {
+          void saveCardPreference('hidden', [], '隐藏规则已清空')
+        }
+        return h('li', { style: cardStyles.card, 'data-dsh-element-inspector-settings-card': '' },
+          h('h3', { style: cardStyles.title }, '元素检查器'),
+          h('p', { style: cardStyles.description }, '管理元素拾取快捷键与当前 profile 的隐藏规则。'),
+          h('div', { style: cardStyles.row },
+            h('div', { style: cardStyles.main }, h('div', { style: cardStyles.label }, '唤起快捷键'), h('div', { style: cardStyles.detail }, '快速按两次仍可打开检查器设置')),
+            h('span', { style: cardStyles.key }, value.hotkey),
+            h('button', { type: 'button', style: cardStyles.button, disabled: !writable || saving, onClick: () => setRecording(true) }, recording ? '请按键…' : '更改'),
+          ),
+          ...value.hidden.map((rule, index) => h('div', { style: cardStyles.row, key: `${index}:${rule.text || rule.id || rule.tag}` },
+            h('div', { style: cardStyles.main }, h('div', { style: cardStyles.label }, rule.text || rule.id || rule.classes?.join(' ') || '无文本元素'), h('div', { style: cardStyles.detail }, `${rule.tag || '*'}${rule.id ? ` #${rule.id}` : ''}`)),
+            h('button', { type: 'button', style: cardStyles.danger, disabled: !writable || saving, title: '取消隐藏', 'aria-label': '取消隐藏', onClick: () => removeHidden(rule) }, '×'),
+          )),
+          h('div', { style: cardStyles.footer },
+            h('span', { style: cardStyles.status, role: 'status' }, status || (snapshot.status === 'loading' ? '正在同步设置' : `${value.hidden.length} 条隐藏规则`)),
+            value.hidden.length ? h('button', { type: 'button', style: cardStyles.button, disabled: !writable || saving, onClick: clearHidden }, '全部取消隐藏') : null,
+          ),
+        )
+      }
+      ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
+        name: 'settings.plugin.item',
+        key: SETTINGS_NAMESPACE,
+      }, InspectorSettingsCard))
       const close = () => { active = false; current = undefined; selectedInfo = undefined; selectedElement = undefined; previousView = ''; clearTimeout(noticeTimer); root?.remove(); root = undefined; mask = undefined }
       const render = (html) => { if (root) root.innerHTML = html }
       const panel = (title, body, options = {}) => `<div class="dei-scrim"></div><section class="dei-panel" role="dialog" aria-modal="true" aria-label="${esc(title)}"><header class="dei-header">${options.back ? '<button type="button" class="dei-back" aria-label="返回" title="返回">‹</button>' : ''}<div class="dei-heading"><p class="dei-eyebrow">${BRAND}</p><h3 class="dei-title">${esc(title)}</h3></div><button type="button" class="dei-close" aria-label="关闭" title="关闭">×</button></header><div class="dei-body">${body}</div></section>`
@@ -255,8 +366,7 @@ window.__ModuleLoader__.load({
         selectedInfo = info
         render(panel('正在分析', '<div class="dei-summary"><p>正在检查元素标记与当前 profile 的 DSH 及插件源码…</p></div>'))
         try {
-          const response = await fetch('/__dsh-element-inspector/resolve', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(info) })
-          const data = await response.json()
+          const data = await callHost(ctx, 'resolve', info)
           const results = data.results || []
           const hits = results.map((hit, index) => {
             const ownerName = hit.ownerName || hit.packageName
@@ -315,19 +425,17 @@ window.__ModuleLoader__.load({
         const button = element?.closest('button[data-package]')
         if (!button || !root?.contains(button)) return
         event.preventDefault(); event.stopPropagation()
-        const endpoint = button.classList.contains('dei-open-folder') ? '/__dsh-element-inspector/open-folder' : '/__dsh-element-inspector/open-repository'
+        const endpoint = button.classList.contains('dei-open-folder') ? 'open-folder' : 'open-repository'
         button.disabled = true
         const originalLabel = button.textContent
         button.textContent = '正在打开…'
         const controller = new AbortController()
         const timeout = setTimeout(() => controller.abort(), 5000)
         try {
-          const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ packageName: button.dataset.package }), signal: controller.signal })
-          const data = await response.json()
-          if (!response.ok) throw new Error(data.message || `请求失败 (${response.status})`)
+          await callHost(ctx, endpoint, { packageName: button.dataset.package }, controller.signal)
           button.disabled = false
           button.textContent = originalLabel
-          notify(endpoint.endsWith('open-folder') ? '插件文件夹已在文件管理器中打开' : '源仓库已在浏览器中打开')
+          notify(endpoint === 'open-folder' ? '插件文件夹已在文件管理器中打开' : '源仓库已在浏览器中打开')
         } catch (error) {
           button.disabled = false
           button.textContent = originalLabel
@@ -339,6 +447,7 @@ window.__ModuleLoader__.load({
         return pick(event)
       }
       const key = event => {
+        if (settingsCardCapturing) return
         if (captureHotkey) { if (event.key === 'Escape') { captureHotkey = false; return settings() }; if (event.key === 'Control' || event.key === 'Shift' || event.key === 'Alt' || event.key === 'Meta') return; const hotkey = eventHotkey(event); captureHotkey = false; void savePreference('hotkey', hotkey).then(() => settings()); return }
         if (eventHotkey(event) === prefs.hotkey) { event.preventDefault(); const now = Date.now(); if (key.last && now - key.last < 550) return settings(); key.last = now; return start() }
         if (event.key === 'Escape' && (active || root)) close()
@@ -373,7 +482,7 @@ window.__ModuleLoader__.load({
       document.addEventListener('keydown', key, true); document.addEventListener('mousemove', move, true); document.addEventListener('click', action, true); document.addEventListener('click', click, true)
       ctx.effect(() => () => { unsubscribePreferences(); observer.disconnect(); document.removeEventListener('keydown', key, true); document.removeEventListener('mousemove', move, true); document.removeEventListener('click', action, true); document.removeEventListener('click', click, true); close(); document.getElementById(STYLE_ID)?.remove() }, 'dsh-element-inspector: listeners')
     }
-    module.exports = { apply, inject: ['settingsScope', 'connection', 'remote', 'slots'] }
+    module.exports = { apply, inject: ['settingsScope', 'connection', 'slots'] }
     return module.exports
   },
 })

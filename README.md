@@ -2,6 +2,8 @@
 
 English | [简体中文](README.zh.md)
 
+![dsh-element-inspector banner](assets/dsh-element-inspector-banner.png)
+
 Inspect a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) UI element, identify whether it belongs to the DSH interface or an installed plugin, and export or hide the selection.
 
 > [!NOTE]
@@ -10,7 +12,7 @@ Inspect a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) UI
 > [!IMPORTANT]
 > Attribution comes from a local evidence-scoring detection algorithm, not an authoritative ownership statement from DSH or a plugin. “Confirmed” only means that the current evidence crossed the algorithm's threshold. It is not an absolute guarantee and does not establish that a plugin is trustworthy, safe, or signed by a particular author.
 
-Press `F1`, point at an element, and click to inspect it. The plugin compares stable DOM markers with client entry files from DSH and plugin modules active in the current runtime, then presents the strongest matches and their supporting evidence.
+Press `F1`, point at an element, and click to inspect it. The plugin compares stable DOM markers with the client bundles DSH is actually serving to the current page, then presents the strongest matches and their supporting evidence.
 
 ![Element selection and attribution demo](assets/dsh-element-inspector-demo.gif)
 
@@ -22,7 +24,7 @@ Press `F1`, point at an element, and click to inspect it. The plugin compares st
 - **Quick navigation**: opens an installed plugin directory or the source repository declared in its `package.json`.
 - **Element export**: captures a local PNG screenshot, copies `outerHTML`, or converts the selection to GitHub Flavored Markdown.
 - **Persistent hiding**: hides selected elements and lets you restore individual elements or clear all hiding rules.
-- **Configurable shortcut**: uses `F1` by default; press it twice quickly to open settings and record a different shortcut.
+- **Configurable shortcut**: uses `F1` by default; press it twice quickly for the compact settings dialog, or manage the shortcut and hidden rules under Settings → Plugin configuration.
 
 ## Screenshots
 
@@ -38,7 +40,7 @@ Press `F1`, point at an element, and click to inspect it. The plugin compares st
 | DSH platforms | Web and Desktop |
 | Operating systems | Windows, Linux, and macOS |
 
-The plugin locates the active profile from the DSH-provided `ctx.baseUrl` and resolves packages through Node.js module search paths. It supports regular npm/pnpm installs, local links, and workspace-hoisted packages without assuming a fixed user directory, drive letter, Desktop data directory, or process working directory.
+The plugin treats the DSH Host's `clientModules.graph()` and `clientPath()` as the runtime source of truth. Regular npm/pnpm installs, local links, workspace-hoisted packages, and dynamic Loader Web plugins therefore follow DSH's actual composition without assuming a fixed user directory, drive letter, Desktop data directory, or process working directory.
 
 ## Installation
 
@@ -83,21 +85,21 @@ The profile remains linked to the checkout. Rebuild the browser bundle and resta
 2. Move the pointer to preview an element, then click to inspect it. Press `Esc` to cancel.
 3. Review the preferred owner and expand the evidence for other candidates.
 4. Capture a screenshot, copy HTML or Markdown, open a matched plugin's location, or hide the element.
-5. Press the shortcut twice quickly to change the shortcut or manage hidden-element rules.
+5. Press the shortcut twice quickly, or open Settings → Plugin configuration, to change the shortcut or manage hidden-element rules.
 
 Screenshots are copied to the system clipboard when the browser allows image writes; otherwise, they are downloaded as PNG files. HTML and Markdown are copied to the clipboard. All capture and conversion work happens locally.
 
 ## How Attribution Works
 
-The client collects stable signals from the selected element and up to seven ancestors, including IDs, classes, `data-*` attributes, ARIA labels, text, and React owner names. For controls projected by the DSH shell, such as settings navigation rows, the algorithm also connects React keys/components to current Cordis slot registrations and matches the registered component's function source. The host resolves the current browser boot modules and active Cordis Loader entries, then scans resolvable packages' declared client entry files and client CSS at conventional locations.
+The client collects stable signals from the selected element and up to seven ancestors, including IDs, classes, `data-*` attributes, ARIA labels, text, and React owner names. For controls projected by the DSH shell, such as settings navigation rows, the algorithm also connects React keys/components to current Cordis slot registrations and matches the registered component's function source. The Host accepts only Web entries in the current `clientModules.graph()` and scans only the served bundle returned by `clientPath(id)`; it does not guess package entry points or scan conventional CSS locations.
 
-Official DSH packages are grouped into one host candidate using built-in DSH identity metadata; other active runtime modules remain separate plugin candidates. Browser boot entries and active Cordis Loader entries cover npm/pnpm installs, links, workspaces, `file:` sources, and dynamically loaded entries that resolve to a package root and client entry. Disabled, Host-only, and inspector-self entries are excluded. Runtime registration source, unique stable markers, and nearer ownership boundaries receive more weight. Shared, generated, or generic markers are discounted. A result is marked as confirmed only for exclusive runtime registration source, an exclusive stable ID/test marker, or multiple independent exclusive markers. A distant DSH wrapper alone is not enough to classify the selected child as official; insufficient evidence remains a candidate or produces no attribution.
+Official DSH packages are grouped into one host candidate using built-in DSH identity metadata; other active runtime modules remain separate plugin candidates. The authoritative server graph automatically excludes disabled, Host-only, unloaded, and inspector-self entries. Opening a plugin directory or repository revalidates the current graph, bundle path, and manifest package name instead of reusing authorization from an earlier inspection. Runtime registration source, unique stable markers, and nearer ownership boundaries receive more weight. Shared, generated, or generic markers are discounted. A result is marked as confirmed only for exclusive runtime registration source, an exclusive stable ID/test marker, or multiple independent exclusive markers. A distant DSH wrapper alone is not enough to classify the selected child as official; insufficient evidence remains a candidate or produces no attribution.
 
 ## Detection Limitations
 
 - This is heuristic attribution, not code signing, call-chain tracing, or an official DSH audit API. A confirmed result can still choose the wrong layer when plugins wrap, rewrite, or jointly compose a control.
-- Only active runtime modules that resolve to a local package root are compared. Unloaded, disabled, Host-only, remote, or unresolvable dynamic code, plus lazy files outside declared entries or conventional CSS locations, may never become candidates.
-- A client entry larger than 1 MB is skipped. Immediately after HMR or an external source replacement, the short-lived source cache may also contain an older revision.
+- Only modules in DSH's current client graph whose bundle maps to a same-named local package manifest are compared. Unloaded, disabled, Host-only, remote, and dynamic code that has a slot registration but no mapped client-module entry do not become package candidates.
+- An actual served client bundle larger than 1 MB is skipped. Source caching invalidates on DSH graph and entry revisions; overwriting a file outside DSH HMR without changing its revision can still retain cached source until the graph changes or the Host restarts.
 - Attribution for shell-projected controls depends on the current DSH slots inspection API and React fiber/key structure. A DSH or React upgrade can break this evidence path, causing results to fall back to DOM/source markers and degrade from confirmed to candidate or unknown.
 - Text, classes, `data-*` names, and function source can be reused or copied across plugins. The algorithm retains competing candidates where possible, but cannot infer the real author without exclusive evidence.
 - Iframes, closed shadow roots, canvas-drawn content, and CSS pseudo-elements are not ordinary selectable DOM nodes for this inspector. Usually only their outer container can be inspected, if anything.
@@ -106,7 +108,8 @@ Official DSH packages are grouped into one host candidate using built-in DSH ide
 
 ## Privacy and Permissions
 
-- Reads client entry files only from DSH and plugin modules active in the current browser/Cordis runtime. Disabled and Host-only entries are excluded.
+- Reads only actual served bundles for entries in the DSH Host's current client module graph. Disabled, unloaded, and Host-only entries are excluded.
+- Identification, folder opening, and repository opening use DSH Connection's loopback-only RPC and inherit its Host, Origin, cross-site, JSON media-type, and streaming body-size fences.
 - Opens verified installed-plugin directories with the operating system file manager. Repository URLs come from the installed plugin's `package.json`.
 - Writes exported HTML, Markdown, or PNG data to the clipboard, with a local PNG download as the screenshot fallback.
 - Stores the shortcut and hiding rules through the official DSH settings service and keeps a browser-local startup cache. Legacy browser settings are migrated once when possible.
@@ -142,7 +145,7 @@ pnpm run test
 pnpm run build
 ```
 
-The test suite covers attribution scoring, portable package resolution, hiding rules, and element export helpers. The build command regenerates the browser bundle with esbuild.
+The test suite covers attribution scoring, authoritative client-module discovery, a real Cordis + Connection route composition and its trust fences, portable package resolution, the settings contract, hiding rules, and element export helpers. The build command regenerates the browser bundle with esbuild.
 
 ## License
 

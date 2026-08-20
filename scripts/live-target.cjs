@@ -26,10 +26,15 @@ async function findInspectableTarget(page, requiredOwnerType) {
       if (element.closest('#dsh-element-inspector-root')) return undefined
       const query = Function(`return (${serialize})`)()(element)
       if (!query.text && !query.aria) return undefined
-      const response = await fetch('/__dsh-element-inspector/resolve', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(query),
+      const rpcId = crypto.randomUUID()
+      const response = await fetch('/dsh-element-inspector/resolve', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId, method: 'resolve', payload: query }),
       })
-      const result = await response.json()
+      const envelope = await response.json()
+      if (!response.ok || envelope.rpcId !== rpcId || !envelope.result?.ok) return undefined
+      const result = envelope.result.value
       const owner = result.results?.[0]
       if (result.certainty !== 'confirmed' || (requiredOwnerType && owner?.ownerType !== requiredOwnerType)) return undefined
       return { query, ownerType: owner?.ownerType, ownerName: owner?.ownerName, packageName: owner?.packageName }

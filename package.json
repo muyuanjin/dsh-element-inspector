@@ -21,7 +21,8 @@
     "README.zh.md",
     "LICENSE",
     "SECURITY.md",
-    "dsh-plugin.json"
+    "dsh-plugin.json",
+    "assets"
   ],
   "repository": {
     "type": "git",
@@ -44,7 +45,7 @@
     "plugin-inspector"
   ],
   "scripts": {
-    "build": "esbuild src/client.js --bundle --platform=browser --format=iife --target=chrome120 --outfile=client.js",
+    "build": "esbuild src/client.js --bundle --platform=browser --format=iife --target=chrome120 --external:react --outfile=client.js",
     "prepack": "pnpm run build",
     "test": "node --test"
   },
@@ -55,31 +56,34 @@
     },
     "client": {
       "platform": "web",
+      "external": [
+        "react"
+      ],
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-connection",
-        "@deepseek-ai/dsh-api-remotes"
+        "@deepseek-ai/dsh-client-ui-settings-plugins",
+        "@deepseek-ai/dsh-client-connection"
       ]
     }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-api-remotes": ">=0.1.0-rc.8 <0.2.0-0",
     "@deepseek-ai/dsh-client-connection": ">=0.1.0-rc.8 <0.2.0-0",
+    "@deepseek-ai/dsh-client-modules": ">=0.1.0-rc.8 <0.2.0-0",
     "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.8 <0.2.0-0",
     "@deepseek-ai/dsh-client-ui-settings": ">=0.1.0-rc.8 <0.2.0-0",
-    "@deepseek-ai/dsh-host-webserver": ">=0.1.0-rc.8 <0.2.0-0",
+    "@deepseek-ai/dsh-client-ui-settings-plugins": ">=0.1.0-rc.8 <0.2.0-0",
     "@deepseek-ai/dsh-settings": ">=0.1.0-rc.8 <0.2.0-0",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
   "disclosure": {
     "cloud": false,
-    "network": "Only accesses local DSH Host routes; opening a source repository launches the URL declared in the plugin package.json in the system browser.",
+    "network": "Only uses the loopback-only DSH Connection RPC; opening a source repository launches the URL declared in the plugin package.json in the system browser.",
     "offlineMode": true,
     "apiKeys": false,
     "permissions": [
-      "Read client entry files from DSH and plugin modules active in the current runtime to match element ownership",
+      "Read the exact client bundles served by DSH for modules active in the current runtime to match element ownership",
       "Open installed plugin directories with the operating system file manager",
       "Capture selected elements locally and copy the PNG to the clipboard or download it",
       "Copy the selected element as HTML or Markdown to the clipboard",
