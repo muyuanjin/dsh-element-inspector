@@ -1,0 +1,23 @@
+{
+  "manifest": 1,
+  "id": "dsh-element-inspector",
+  "name": "元素雷达",
+  "version": "0.4.0",
+  "description": "识别 DSH 页面元素的插件归属，并永久隐藏不需要的界面元素。",
+  "repository": "https://github.com/muyuanjin/dsh-element-inspector",
+  "license": "MIT",
+  "compatibility": {
+    "dsh": ">=0.1.0-rc.8 <0.2.0-0",
+    "platforms": ["web", "desktop"],
+    "os": ["windows", "linux", "macos"]
+  },
+  "entrypoints": {
+    "host": "./index.js",
+    "client": "./client.js"
+  },
+  "permissions": [
+    "read-installed-plugin-sources",
+    "open-installed-plugin-folder",
+    "dsh-settings"
+  ]
+}
