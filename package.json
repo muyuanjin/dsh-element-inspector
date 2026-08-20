@@ -1,7 +1,7 @@
 {
   "name": "dsh-element-inspector",
-  "version": "0.4.0",
-  "description": "元素雷达：识别 DSH 页面元素的插件归属，并永久隐藏不需要的界面元素。",
+  "version": "0.5.0",
+  "description": "识别 DSH 页面元素的插件归属，导出所选元素，并隐藏不需要的界面元素。",
   "type": "module",
   "main": "./index.js",
   "exports": {
@@ -35,14 +35,19 @@
     "dsh",
     "dsh-plugin",
     "element-inspector",
+    "element-screenshot",
     "plugin-inspector"
   ],
   "scripts": {
+    "build": "esbuild src/client.js --bundle --platform=browser --format=iife --target=chrome120 --outfile=client.js",
+    "prepack": "pnpm run build",
     "test": "node --test"
   },
   "author": "muyuanjin",
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "inject": [
@@ -55,11 +60,11 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-host-webserver": ">=0.1.0-rc.8 <0.2.0-0",
+    "@deepseek-ai/dsh-api-remotes": ">=0.1.0-rc.8 <0.2.0-0",
+    "@deepseek-ai/dsh-client-connection": ">=0.1.0-rc.8 <0.2.0-0",
     "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.8 <0.2.0-0",
     "@deepseek-ai/dsh-client-ui-settings": ">=0.1.0-rc.8 <0.2.0-0",
-    "@deepseek-ai/dsh-client-connection": ">=0.1.0-rc.8 <0.2.0-0",
-    "@deepseek-ai/dsh-api-remotes": ">=0.1.0-rc.8 <0.2.0-0",
+    "@deepseek-ai/dsh-host-webserver": ">=0.1.0-rc.8 <0.2.0-0",
     "@deepseek-ai/dsh-settings": ">=0.1.0-rc.8 <0.2.0-0",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
@@ -71,10 +76,19 @@
     "permissions": [
       "读取当前 DSH web profile 中已安装插件的文本源码以匹配元素归属",
       "通过操作系统文件管理器打开已安装插件目录",
+      "在本地生成所选元素截图，并按浏览器能力复制到剪贴板或下载 PNG",
+      "将所选元素的 HTML 或 Markdown 写入系统剪贴板",
       "通过 DSH 官方 settings 服务保存快捷键和元素隐藏规则"
     ],
     "jurisdiction": "本地运行，不上传数据",
     "retention": "仅在本机保留快捷键和隐藏规则，用户可在插件设置中清除隐藏规则"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@joplin/turndown-plugin-gfm": "1.0.67",
+    "esbuild": "0.28.2",
+    "html-to-image": "1.11.13",
+    "playwright": "1.62.1",
+    "turndown": "7.2.4"
+  }
 }

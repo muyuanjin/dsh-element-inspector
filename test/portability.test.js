@@ -10,6 +10,7 @@ import {
   openExternal,
   profileDirectoryFromBaseUrl,
   resolveInstalledPackage,
+  revealDirectory,
   validatePackageName,
 } from '../portability.js'
 
@@ -107,4 +108,13 @@ test('passes special paths as one argument and falls back to gio when xdg-open i
     ['gio', ['open', target]],
   ])
   assert.equal(calls[1].options.shell, false)
+})
+
+test('uses Electron showItemInFolder when running inside Desktop', async () => {
+  const calls = []
+  const target = 'C:\\profile\\node_modules\\plugin-alpha'
+  await revealDirectory(target, {
+    electron: { shell: { showItemInFolder: path => calls.push(path) } },
+  })
+  assert.deepEqual(calls, [join(target, 'package.json')])
 })

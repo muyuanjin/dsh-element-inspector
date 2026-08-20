@@ -1,12 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/imsai-sh/awesome-deepseek-harness-plugins/main/schema/catalog-entry.schema.json",
   "id": "dsh-element-inspector",
-  "name": "Element Radar / 元素雷达",
+  "name": "dsh-element-inspector",
   "repository": "https://github.com/muyuanjin/dsh-element-inspector",
   "category": "developer-tools",
   "description": {
-    "en": "Identify which installed plugin owns a DSH UI element and permanently hide unwanted elements.",
-    "zh-CN": "识别 DSH 页面元素属于哪个已安装插件，并永久隐藏不需要的界面元素。"
+    "en": "Identify which installed plugin owns a DSH UI element, export the selection, and hide unwanted elements.",
+    "zh-CN": "识别 DSH 页面元素属于哪个已安装插件，导出所选元素，并隐藏不需要的界面元素。"
   },
   "added": "2026-08-20"
 }

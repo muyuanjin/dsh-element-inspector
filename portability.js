@@ -73,3 +73,17 @@ export async function openExternal(target, options = {}) {
   }
   throw new Error(`no system opener is available on ${options.platform ?? process.platform}`, { cause: lastError })
 }
+
+export async function revealDirectory(target, options = {}) {
+  const value = typeof target === 'string' ? target : ''
+  if (!value) throw new Error('open target is empty')
+  let electron = options.electron
+  if (electron === undefined) {
+    try { electron = await import('electron') } catch {}
+  }
+  if (typeof electron?.shell?.showItemInFolder === 'function') {
+    electron.shell.showItemInFolder(join(value, 'package.json'))
+    return
+  }
+  await openExternal(value, options)
+}

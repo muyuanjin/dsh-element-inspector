@@ -3,7 +3,7 @@ import { join, relative } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import { extractSignals, scorePackages } from './scoring.js'
-import { openExternal, profileDirectoryFromBaseUrl, resolveInstalledPackage, validatePackageName } from './portability.js'
+import { openExternal, profileDirectoryFromBaseUrl, resolveInstalledPackage, revealDirectory, validatePackageName } from './portability.js'
 
 export const name = 'dsh-element-inspector'
 export const inject = ['webServer']
@@ -16,12 +16,18 @@ const MAX_FILE_BYTES = 1_000_000
 const MAX_RESULTS = 8
 const NON_RUNTIME_DIRECTORIES = new Set(['assets', 'docs', 'examples', 'marketplace', 'scripts', 'test', 'tests', 'tools'])
 const SETTINGS_NAMESPACE = settingsNamespace(name)
-const HiddenRuleSchema = z.object({
+const HiddenNodeSchema = z.object({
   id: z.string().default(''),
   classes: z.array(z.string()).default([]),
   attrs: z.dict(z.string()).default({}),
-  text: z.string().default(''),
   tag: z.string().default(''),
+  nth: z.number().default(0),
+})
+const HiddenRuleSchema = z.object({
+  ...HiddenNodeSchema.dict,
+  text: z.string().default(''),
+  version: z.number().default(1),
+  ancestors: z.array(HiddenNodeSchema).default([]),
 })
 const SettingsSchema = z.object({
   hotkey: z.string().default('F1'),
@@ -148,7 +154,7 @@ export function apply(ctx) {
         const query = await bodyOf(req)
         const profileDir = await activeProfileDirectory(ctx.baseUrl)
         const details = await packageDetails(profileDir, string(query.packageName, 200))
-        await openExternal(details.root)
+        await revealDirectory(details.root)
         return json(res, 200, { ok: true })
       } catch (error) {
         ctx.logger?.warn?.(`[${name}] open folder failed: ${String(error)}`)
