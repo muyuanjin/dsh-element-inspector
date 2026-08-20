@@ -12,7 +12,7 @@ async function main() {
   })
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   await page.goto(endpoint, { waitUntil: 'domcontentloaded' })
-  const { target } = await findInspectableTarget(page)
+  const { target } = await findInspectableTarget(page, 'plugin')
   await page.keyboard.press('F1')
   await target.hover()
   await target.click()

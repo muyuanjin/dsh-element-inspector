@@ -16,13 +16,13 @@ function targetInfo(target) {
   }
 }
 
-async function findInspectableTarget(page) {
+async function findInspectableTarget(page, requiredOwnerType) {
   const candidates = page.locator('button,[role="button"]')
   const count = Math.min(await candidates.count(), 80)
   for (let index = 0; index < count; index += 1) {
     const candidate = candidates.nth(index)
     if (!await candidate.isVisible()) continue
-    const evaluation = await candidate.evaluate(async (element, serialize) => {
+    const evaluation = await candidate.evaluate(async (element, { serialize, requiredOwnerType }) => {
       if (element.closest('#dsh-element-inspector-root')) return undefined
       const query = Function(`return (${serialize})`)()(element)
       if (!query.text && !query.aria) return undefined
@@ -30,8 +30,10 @@ async function findInspectableTarget(page) {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(query),
       })
       const result = await response.json()
-      return result.certainty === 'confirmed' ? { query, packageName: result.results?.[0]?.packageName } : undefined
-    }, targetInfo.toString())
+      const owner = result.results?.[0]
+      if (result.certainty !== 'confirmed' || (requiredOwnerType && owner?.ownerType !== requiredOwnerType)) return undefined
+      return { query, ownerType: owner?.ownerType, ownerName: owner?.ownerName, packageName: owner?.packageName }
+    }, { serialize: targetInfo.toString(), requiredOwnerType })
     if (evaluation) return { target: candidate, ...evaluation }
   }
   throw new Error('No privacy-safe element with exclusive runtime evidence was found')

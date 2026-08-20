@@ -1,7 +1,7 @@
 {
   "name": "dsh-element-inspector",
   "version": "0.5.0",
-  "description": "Identify which installed plugin owns a DSH UI element, export the selection, and hide unwanted elements.",
+  "description": "Identify whether a DSH UI element belongs to the host interface or an installed plugin, then export or hide it.",
   "type": "module",
   "main": "./index.js",
   "exports": {
@@ -12,6 +12,8 @@
   "files": [
     "index.js",
     "client.js",
+    "dsh-metadata.js",
+    "runtime-candidates.js",
     "scoring.js",
     "portability.js",
     "cordis.patch.yml",
@@ -77,7 +79,7 @@
     "offlineMode": true,
     "apiKeys": false,
     "permissions": [
-      "Read text source files from plugins installed in the active DSH web profile to match element ownership",
+      "Read client entry files from DSH and plugin modules active in the current runtime to match element ownership",
       "Open installed plugin directories with the operating system file manager",
       "Capture selected elements locally and copy the PNG to the clipboard or download it",
       "Copy the selected element as HTML or Markdown to the clipboard",

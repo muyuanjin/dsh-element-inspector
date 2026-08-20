@@ -3,7 +3,7 @@
   "id": "dsh-element-inspector",
   "name": "dsh-element-inspector",
   "version": "0.5.0",
-  "description": "Identify which installed plugin owns a DSH UI element, export the selection, and hide unwanted elements.",
+  "description": "Identify whether a DSH UI element belongs to the host interface or an installed plugin, then export or hide it.",
   "repository": "https://github.com/muyuanjin/dsh-element-inspector",
   "license": "MIT",
   "compatibility": {

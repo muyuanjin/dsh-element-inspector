@@ -1,5 +1,6 @@
 import { captureElementPng, elementToMarkdown, serializeElement } from './selection-actions.js'
 import { createHiddenRule, matchesHiddenElement, resolveUniqueHiddenMatches } from './hidden-rules.js'
+import { runtimeRegistrations } from './runtime-registrations.js'
 
 window.__ModuleLoader__.load({
   id: 'dsh-element-inspector',
@@ -89,7 +90,8 @@ window.__ModuleLoader__.load({
       for (let sibling = element.previousElementSibling; sibling; sibling = sibling.previousElementSibling) if (sibling.tagName === element.tagName) index += 1
       return index
     }
-    function targetInfo(target) {
+
+    function targetInfo(target, slots) {
       const attrs = {}
       for (const attr of target.attributes ?? []) if (/^(data-|aria-|role$)/.test(attr.name)) attrs[attr.name] = attr.value
       const fiberKey = Object.keys(target).find(key => key.startsWith('__reactFiber$') || key.startsWith('__reactInternalInstance$'))
@@ -102,7 +104,8 @@ window.__ModuleLoader__.load({
         for (const attr of node.attributes ?? []) if (/^(data-|aria-|role$)/.test(attr.name)) ancestorAttrs[attr.name] = attr.value
         ancestors.push({ id: node.id || '', classes: typeof node.className === 'string' ? node.className.slice(0, 240) : '', attrs: ancestorAttrs, tag: node.tagName || '', nth: nthOfType(node) })
       }
-      return { text: normalizeText(target.innerText || target.textContent), aria: target.getAttribute('aria-label') || '', id: target.id || '', classes: typeof target.className === 'string' ? target.className.slice(0, 240) : '', role: target.getAttribute('role') || '', tag: target.tagName || '', nth: nthOfType(target), attrs, ancestors, owner }
+      const clientEntries = [...new Set((window.__DSH_BOOT__?.entries ?? []).map(entry => typeof entry?.id === 'string' ? entry.id.slice(0, 200) : '').filter(Boolean))].slice(0, 120)
+      return { text: normalizeText(target.innerText || target.textContent), aria: target.getAttribute('aria-label') || '', id: target.id || '', classes: typeof target.className === 'string' ? target.className.slice(0, 240) : '', role: target.getAttribute('role') || '', tag: target.tagName || '', nth: nthOfType(target), attrs, ancestors, owner, clientEntries, runtimeRegistrations: runtimeRegistrations(target, slots) }
     }
 
     async function writeText(text) {
@@ -248,25 +251,29 @@ window.__ModuleLoader__.load({
         if (!active || !current || root?.contains(event.target)) return
         event.preventDefault(); event.stopPropagation(); active = false
         selectedElement = current
-        const info = targetInfo(selectedElement)
+        const info = targetInfo(selectedElement, ctx.slots)
         selectedInfo = info
-        render(panel('正在分析', '<div class="dei-summary"><p>正在检查元素标记与当前 profile 的插件源码…</p></div>'))
+        render(panel('正在分析', '<div class="dei-summary"><p>正在检查元素标记与当前 profile 的 DSH 及插件源码…</p></div>'))
         try {
           const response = await fetch('/__dsh-element-inspector/resolve', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(info) })
           const data = await response.json()
           const results = data.results || []
-          const hits = results.map((hit, index) => `<details class="dei-hit"${index === 0 ? ' open' : ''}><summary><span class="dei-hit-name">${esc(hit.packageName)} · v${esc(hit.version)}</span><span class="dei-hit-score">${esc(hit.score)} 分</span></summary><div class="dei-hit-body">${hit.files.map(file => `<div class="dei-file"><code>${esc(file.file)}</code>${file.evidence?.length ? `<br>${esc(file.evidence.join(' · '))}` : ''}</div>`).join('')}<div class="dei-actions"><button type="button" class="dei-button dei-small dei-outline dei-open-folder" data-package="${esc(hit.packageName)}">打开插件文件夹</button><button type="button" class="dei-button dei-small dei-open-repo" data-package="${esc(hit.packageName)}"${hit.repositoryUrl ? '' : ' disabled'}>打开源仓库</button></div></div></details>`).join('')
+          const hits = results.map((hit, index) => {
+            const ownerName = hit.ownerName || hit.packageName
+            const sourceActions = hit.ownerType === 'dsh' ? '' : `<div class="dei-actions"><button type="button" class="dei-button dei-small dei-outline dei-open-folder" data-package="${esc(hit.packageName)}">打开插件文件夹</button><button type="button" class="dei-button dei-small dei-open-repo" data-package="${esc(hit.packageName)}"${hit.repositoryUrl ? '' : ' disabled'}>打开源仓库</button></div>`
+            return `<details class="dei-hit"${index === 0 ? ' open' : ''}><summary><span class="dei-hit-name">${esc(ownerName)} · v${esc(hit.version)}</span><span class="dei-hit-score">${esc(hit.score)} 分</span></summary><div class="dei-hit-body">${hit.files.map(file => `<div class="dei-file"><code>${esc(file.file)}</code>${file.evidence?.length ? `<br>${esc(file.evidence.join(' · '))}` : ''}</div>`).join('')}${sourceActions}</div></details>`
+          }).join('')
           const top = results[0]
-          const heading = top ? (data.certainty === 'confirmed' ? '已确认元素归属' : '可能的元素归属') : '没有找到插件归属'
+          const heading = top ? (top.ownerType === 'dsh' ? (data.certainty === 'confirmed' ? '已确认来自 DSH' : '可能来自 DSH') : (data.certainty === 'confirmed' ? '已确认元素归属' : '可能的元素归属')) : '没有找到元素归属'
           const owner = info.owner ? `<span>组件 ${esc(info.owner)}</span>` : ''
           const proposedRule = createHiddenRule(info)
           const canHide = Boolean(proposedRule.id || proposedRule.classes.length || Object.keys(proposedRule.attrs).length || proposedRule.text)
           const reason = data.reasons?.[0] ? `<span>${esc(data.reasons[0])}</span>` : ''
-          const summary = top ? `<div class="dei-conclusion"><div class="dei-conclusion-head"><span class="dei-conclusion-mark">${data.certainty === 'confirmed' ? '✓' : '?'}</span><div class="dei-plugin-name">${esc(top.packageName)}</div><span class="dei-pill ${data.certainty === 'confirmed' ? 'dei-pill-confirmed' : 'dei-pill-candidate'}">${data.certainty === 'confirmed' ? '已确认' : '待确认'}</span></div><div class="dei-meta"><span>v${esc(top.version)}</span><span>证据分 ${esc(top.score)}</span>${owner}${reason}</div></div>` : '<div class="dei-conclusion"><p>这个元素可能来自 DSH 官方界面、动态内容或纯样式，当前 profile 中没有足够的插件证据。</p></div>'
+          const summary = top ? `<div class="dei-conclusion"><div class="dei-conclusion-head"><span class="dei-conclusion-mark">${data.certainty === 'confirmed' ? '✓' : '?'}</span><div class="dei-plugin-name">${esc(top.ownerName || top.packageName)}</div><span class="dei-pill ${data.certainty === 'confirmed' ? 'dei-pill-confirmed' : 'dei-pill-candidate'}">${data.certainty === 'confirmed' ? '已确认' : '待确认'}</span></div><div class="dei-meta"><span>v${esc(top.version)}</span><span>证据分 ${esc(top.score)}</span>${owner}${reason}</div></div>` : '<div class="dei-conclusion"><p>这个元素可能来自动态内容或纯样式，当前 profile 中没有足够的归属证据。</p></div>'
           const elementLabel = info.text || info.aria || `${String(info.tag || 'element').toLowerCase()} 元素`
           const text = `<div class="dei-element"><div class="dei-element-label">所选元素</div><div class="dei-element-value" title="${esc(elementLabel)}">${esc(elementLabel)}</div></div>`
           const actions = `<div class="dei-actions">${canHide ? '<button type="button" class="dei-button dei-primary dei-hide-current">隐藏此元素</button>' : ''}<button type="button" class="dei-button dei-outline dei-settings">插件设置</button></div>`
-          render(panel(heading, `${summary}${text}${actions}${exportActions()}${hits ? `<div class="dei-section-title">${data.certainty === 'confirmed' ? '判断依据' : '候选插件'}</div>${hits}` : ''}`))
+          render(panel(heading, `${summary}${text}${actions}${exportActions()}${hits ? `<div class="dei-section-title">${data.certainty === 'confirmed' ? '判断依据' : '候选归属'}</div>${hits}` : ''}`))
         } catch (error) { render(panel('分析失败', `<p class="dei-error">${esc(error)}</p>${exportActions()}<div class="dei-actions"><button type="button" class="dei-button dei-primary dei-settings">打开设置</button></div>`)) }
       }
       const action = async event => {
@@ -366,7 +373,7 @@ window.__ModuleLoader__.load({
       document.addEventListener('keydown', key, true); document.addEventListener('mousemove', move, true); document.addEventListener('click', action, true); document.addEventListener('click', click, true)
       ctx.effect(() => () => { unsubscribePreferences(); observer.disconnect(); document.removeEventListener('keydown', key, true); document.removeEventListener('mousemove', move, true); document.removeEventListener('click', action, true); document.removeEventListener('click', click, true); close(); document.getElementById(STYLE_ID)?.remove() }, 'dsh-element-inspector: listeners')
     }
-    module.exports = { apply, inject: ['settingsScope', 'connection', 'remote'] }
+    module.exports = { apply, inject: ['settingsScope', 'connection', 'remote', 'slots'] }
     return module.exports
   },
 })

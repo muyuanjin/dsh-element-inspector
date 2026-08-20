@@ -2103,6 +2103,114 @@ ${caption}${tableContent}
     return matchesHiddenInfo(info, rule);
   }
 
+  // src/runtime-registrations.js
+  function functionSource(value) {
+    if (typeof value !== "function") return "";
+    try {
+      return Function.prototype.toString.call(value);
+    } catch {
+      return "";
+    }
+  }
+  function sourceSamples(value) {
+    const source = functionSource(value).trim();
+    if (source.length < 80 || source.includes("[native code]")) return [];
+    if (source.length <= 900) return [source];
+    const width = 320;
+    return [...new Set([0, Math.floor((source.length - width) / 2), source.length - width].map((start) => source.slice(start, start + width)))].filter(Boolean);
+  }
+  function slotNames(slots) {
+    let roots;
+    try {
+      roots = slots.snapshot();
+    } catch {
+      return [];
+    }
+    const names = /* @__PURE__ */ new Set();
+    const visit = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (typeof node.name === "string") names.add(node.name);
+      for (const child of Array.isArray(node.children) ? node.children : []) visit(child);
+    };
+    for (const root2 of Array.isArray(roots) ? roots : []) visit(root2);
+    return [...names];
+  }
+  function quotedInSource(source, value) {
+    return [`"${value}"`, `'${value}'`, `\`${value}\``].some((quoted) => source.includes(quoted));
+  }
+  function slotsReferencedByFiber(fiber, names) {
+    const direct = [fiber?.memoizedProps?.slotKey, fiber?.memoizedProps?.["data-slot"]].filter((value) => names.includes(value));
+    const sources = [...new Set([functionSource(fiber?.type), functionSource(fiber?.elementType)].filter(Boolean))];
+    return [.../* @__PURE__ */ new Set([...direct, ...names.filter((name) => sources.some((source) => quotedInSource(source, name)))])];
+  }
+  function nearestProjectedSlots(fibers, names) {
+    for (const fiber of fibers) {
+      if (typeof fiber.type === "string" && !fiber.key) continue;
+      const referenced = slotsReferencedByFiber(fiber, names);
+      if (referenced.length) return new Set(referenced);
+    }
+    return /* @__PURE__ */ new Set();
+  }
+  function collectEntries(slots, names) {
+    const entries = [];
+    for (const slot of names) {
+      let slotEntries;
+      try {
+        slotEntries = slots.entries(slot);
+      } catch {
+        continue;
+      }
+      for (const entry of Array.isArray(slotEntries) ? slotEntries : []) entries.push({ slot, entry });
+    }
+    return entries;
+  }
+  function runtimeRegistrations(target, slots) {
+    const fiberKey = Object.keys(target).find((key) => key.startsWith("__reactFiber$") || key.startsWith("__reactInternalInstance$"));
+    let fiber = fiberKey ? target[fiberKey] : void 0;
+    const fibers = [];
+    for (let depth = 0; fiber && depth < 32; depth += 1, fiber = fiber.return) {
+      fibers.push({ depth, key: typeof fiber.key === "string" ? fiber.key : fiber.key == null ? "" : String(fiber.key), type: fiber.type, elementType: fiber.elementType, memoizedProps: fiber.memoizedProps });
+    }
+    if (!fibers.length) return [];
+    const names = slotNames(slots);
+    const entries = collectEntries(slots, names);
+    const projectedSlots = nearestProjectedSlots(fibers, names);
+    const projectedKeyMatches = /* @__PURE__ */ new Map();
+    for (const { slot, entry } of entries) {
+      if (!projectedSlots.has(slot)) continue;
+      const optionKey = entry?.options?.id ?? entry?.options?.key;
+      if (optionKey === void 0) continue;
+      for (const row of fibers) {
+        if (typeof row.type !== "string" || row.key !== String(optionKey)) continue;
+        const key = `${row.depth}\0${row.key}`;
+        const current = projectedKeyMatches.get(key) ?? [];
+        current.push({ slot, entry, depth: row.depth });
+        projectedKeyMatches.set(key, current);
+      }
+    }
+    const matches = [];
+    for (const { slot, entry } of entries) {
+      const optionKey = entry?.options?.id ?? entry?.options?.key;
+      let depth = Number.POSITIVE_INFINITY;
+      for (const row of fibers) {
+        if (typeof row.type === "function" && (row.type === entry.component || row.elementType === entry.component)) depth = Math.min(depth, row.depth);
+        if (optionKey === void 0 || typeof row.type !== "string" || row.key !== String(optionKey)) continue;
+        const keyMatches = projectedKeyMatches.get(`${row.depth}\0${row.key}`) ?? [];
+        if (keyMatches.length === 1 && keyMatches[0].slot === slot && keyMatches[0].entry === entry) depth = Math.min(depth, row.depth);
+      }
+      if (!Number.isFinite(depth)) continue;
+      const sources = [.../* @__PURE__ */ new Set([...sourceSamples(entry.component), ...sourceSamples(entry.inject)])].slice(0, 4);
+      if (!sources.length) continue;
+      matches.push({
+        slot: slot.slice(0, 160),
+        key: optionKey === void 0 ? "" : String(optionKey).slice(0, 160),
+        depth,
+        sources
+      });
+    }
+    return matches.sort((a, b) => a.depth - b.depth || a.slot.localeCompare(b.slot)).slice(0, 8);
+  }
+
   // src/client.js
   window.__ModuleLoader__.load({
     id: "dsh-element-inspector",
@@ -2201,7 +2309,7 @@ ${caption}${tableContent}
         for (let sibling = element.previousElementSibling; sibling; sibling = sibling.previousElementSibling) if (sibling.tagName === element.tagName) index += 1;
         return index;
       }
-      function targetInfo(target) {
+      function targetInfo(target, slots) {
         const attrs = {};
         for (const attr of target.attributes ?? []) if (/^(data-|aria-|role$)/.test(attr.name)) attrs[attr.name] = attr.value;
         const fiberKey = Object.keys(target).find((key) => key.startsWith("__reactFiber$") || key.startsWith("__reactInternalInstance$"));
@@ -2214,7 +2322,8 @@ ${caption}${tableContent}
           for (const attr of node.attributes ?? []) if (/^(data-|aria-|role$)/.test(attr.name)) ancestorAttrs[attr.name] = attr.value;
           ancestors.push({ id: node.id || "", classes: typeof node.className === "string" ? node.className.slice(0, 240) : "", attrs: ancestorAttrs, tag: node.tagName || "", nth: nthOfType2(node) });
         }
-        return { text: normalizeText(target.innerText || target.textContent), aria: target.getAttribute("aria-label") || "", id: target.id || "", classes: typeof target.className === "string" ? target.className.slice(0, 240) : "", role: target.getAttribute("role") || "", tag: target.tagName || "", nth: nthOfType2(target), attrs, ancestors, owner };
+        const clientEntries = [...new Set((window.__DSH_BOOT__?.entries ?? []).map((entry) => typeof entry?.id === "string" ? entry.id.slice(0, 200) : "").filter(Boolean))].slice(0, 120);
+        return { text: normalizeText(target.innerText || target.textContent), aria: target.getAttribute("aria-label") || "", id: target.id || "", classes: typeof target.className === "string" ? target.className.slice(0, 240) : "", role: target.getAttribute("role") || "", tag: target.tagName || "", nth: nthOfType2(target), attrs, ancestors, owner, clientEntries, runtimeRegistrations: runtimeRegistrations(target, slots) };
       }
       async function writeText(text) {
         try {
@@ -2378,25 +2487,29 @@ ${caption}${tableContent}
           event.stopPropagation();
           active = false;
           selectedElement = current;
-          const info = targetInfo(selectedElement);
+          const info = targetInfo(selectedElement, ctx.slots);
           selectedInfo = info;
-          render(panel("\u6B63\u5728\u5206\u6790", '<div class="dei-summary"><p>\u6B63\u5728\u68C0\u67E5\u5143\u7D20\u6807\u8BB0\u4E0E\u5F53\u524D profile \u7684\u63D2\u4EF6\u6E90\u7801\u2026</p></div>'));
+          render(panel("\u6B63\u5728\u5206\u6790", '<div class="dei-summary"><p>\u6B63\u5728\u68C0\u67E5\u5143\u7D20\u6807\u8BB0\u4E0E\u5F53\u524D profile \u7684 DSH \u53CA\u63D2\u4EF6\u6E90\u7801\u2026</p></div>'));
           try {
             const response = await fetch("/__dsh-element-inspector/resolve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(info) });
             const data = await response.json();
             const results = data.results || [];
-            const hits = results.map((hit, index) => `<details class="dei-hit"${index === 0 ? " open" : ""}><summary><span class="dei-hit-name">${esc(hit.packageName)} \xB7 v${esc(hit.version)}</span><span class="dei-hit-score">${esc(hit.score)} \u5206</span></summary><div class="dei-hit-body">${hit.files.map((file) => `<div class="dei-file"><code>${esc(file.file)}</code>${file.evidence?.length ? `<br>${esc(file.evidence.join(" \xB7 "))}` : ""}</div>`).join("")}<div class="dei-actions"><button type="button" class="dei-button dei-small dei-outline dei-open-folder" data-package="${esc(hit.packageName)}">\u6253\u5F00\u63D2\u4EF6\u6587\u4EF6\u5939</button><button type="button" class="dei-button dei-small dei-open-repo" data-package="${esc(hit.packageName)}"${hit.repositoryUrl ? "" : " disabled"}>\u6253\u5F00\u6E90\u4ED3\u5E93</button></div></div></details>`).join("");
+            const hits = results.map((hit, index) => {
+              const ownerName = hit.ownerName || hit.packageName;
+              const sourceActions = hit.ownerType === "dsh" ? "" : `<div class="dei-actions"><button type="button" class="dei-button dei-small dei-outline dei-open-folder" data-package="${esc(hit.packageName)}">\u6253\u5F00\u63D2\u4EF6\u6587\u4EF6\u5939</button><button type="button" class="dei-button dei-small dei-open-repo" data-package="${esc(hit.packageName)}"${hit.repositoryUrl ? "" : " disabled"}>\u6253\u5F00\u6E90\u4ED3\u5E93</button></div>`;
+              return `<details class="dei-hit"${index === 0 ? " open" : ""}><summary><span class="dei-hit-name">${esc(ownerName)} \xB7 v${esc(hit.version)}</span><span class="dei-hit-score">${esc(hit.score)} \u5206</span></summary><div class="dei-hit-body">${hit.files.map((file) => `<div class="dei-file"><code>${esc(file.file)}</code>${file.evidence?.length ? `<br>${esc(file.evidence.join(" \xB7 "))}` : ""}</div>`).join("")}${sourceActions}</div></details>`;
+            }).join("");
             const top = results[0];
-            const heading = top ? data.certainty === "confirmed" ? "\u5DF2\u786E\u8BA4\u5143\u7D20\u5F52\u5C5E" : "\u53EF\u80FD\u7684\u5143\u7D20\u5F52\u5C5E" : "\u6CA1\u6709\u627E\u5230\u63D2\u4EF6\u5F52\u5C5E";
+            const heading = top ? top.ownerType === "dsh" ? data.certainty === "confirmed" ? "\u5DF2\u786E\u8BA4\u6765\u81EA DSH" : "\u53EF\u80FD\u6765\u81EA DSH" : data.certainty === "confirmed" ? "\u5DF2\u786E\u8BA4\u5143\u7D20\u5F52\u5C5E" : "\u53EF\u80FD\u7684\u5143\u7D20\u5F52\u5C5E" : "\u6CA1\u6709\u627E\u5230\u5143\u7D20\u5F52\u5C5E";
             const owner = info.owner ? `<span>\u7EC4\u4EF6 ${esc(info.owner)}</span>` : "";
             const proposedRule = createHiddenRule(info);
             const canHide = Boolean(proposedRule.id || proposedRule.classes.length || Object.keys(proposedRule.attrs).length || proposedRule.text);
             const reason = data.reasons?.[0] ? `<span>${esc(data.reasons[0])}</span>` : "";
-            const summary = top ? `<div class="dei-conclusion"><div class="dei-conclusion-head"><span class="dei-conclusion-mark">${data.certainty === "confirmed" ? "\u2713" : "?"}</span><div class="dei-plugin-name">${esc(top.packageName)}</div><span class="dei-pill ${data.certainty === "confirmed" ? "dei-pill-confirmed" : "dei-pill-candidate"}">${data.certainty === "confirmed" ? "\u5DF2\u786E\u8BA4" : "\u5F85\u786E\u8BA4"}</span></div><div class="dei-meta"><span>v${esc(top.version)}</span><span>\u8BC1\u636E\u5206 ${esc(top.score)}</span>${owner}${reason}</div></div>` : '<div class="dei-conclusion"><p>\u8FD9\u4E2A\u5143\u7D20\u53EF\u80FD\u6765\u81EA DSH \u5B98\u65B9\u754C\u9762\u3001\u52A8\u6001\u5185\u5BB9\u6216\u7EAF\u6837\u5F0F\uFF0C\u5F53\u524D profile \u4E2D\u6CA1\u6709\u8DB3\u591F\u7684\u63D2\u4EF6\u8BC1\u636E\u3002</p></div>';
+            const summary = top ? `<div class="dei-conclusion"><div class="dei-conclusion-head"><span class="dei-conclusion-mark">${data.certainty === "confirmed" ? "\u2713" : "?"}</span><div class="dei-plugin-name">${esc(top.ownerName || top.packageName)}</div><span class="dei-pill ${data.certainty === "confirmed" ? "dei-pill-confirmed" : "dei-pill-candidate"}">${data.certainty === "confirmed" ? "\u5DF2\u786E\u8BA4" : "\u5F85\u786E\u8BA4"}</span></div><div class="dei-meta"><span>v${esc(top.version)}</span><span>\u8BC1\u636E\u5206 ${esc(top.score)}</span>${owner}${reason}</div></div>` : '<div class="dei-conclusion"><p>\u8FD9\u4E2A\u5143\u7D20\u53EF\u80FD\u6765\u81EA\u52A8\u6001\u5185\u5BB9\u6216\u7EAF\u6837\u5F0F\uFF0C\u5F53\u524D profile \u4E2D\u6CA1\u6709\u8DB3\u591F\u7684\u5F52\u5C5E\u8BC1\u636E\u3002</p></div>';
             const elementLabel = info.text || info.aria || `${String(info.tag || "element").toLowerCase()} \u5143\u7D20`;
             const text = `<div class="dei-element"><div class="dei-element-label">\u6240\u9009\u5143\u7D20</div><div class="dei-element-value" title="${esc(elementLabel)}">${esc(elementLabel)}</div></div>`;
             const actions = `<div class="dei-actions">${canHide ? '<button type="button" class="dei-button dei-primary dei-hide-current">\u9690\u85CF\u6B64\u5143\u7D20</button>' : ""}<button type="button" class="dei-button dei-outline dei-settings">\u63D2\u4EF6\u8BBE\u7F6E</button></div>`;
-            render(panel(heading, `${summary}${text}${actions}${exportActions()}${hits ? `<div class="dei-section-title">${data.certainty === "confirmed" ? "\u5224\u65AD\u4F9D\u636E" : "\u5019\u9009\u63D2\u4EF6"}</div>${hits}` : ""}`));
+            render(panel(heading, `${summary}${text}${actions}${exportActions()}${hits ? `<div class="dei-section-title">${data.certainty === "confirmed" ? "\u5224\u65AD\u4F9D\u636E" : "\u5019\u9009\u5F52\u5C5E"}</div>${hits}` : ""}`));
           } catch (error) {
             render(panel("\u5206\u6790\u5931\u8D25", `<p class="dei-error">${esc(error)}</p>${exportActions()}<div class="dei-actions"><button type="button" class="dei-button dei-primary dei-settings">\u6253\u5F00\u8BBE\u7F6E</button></div>`));
           }
@@ -2569,7 +2682,7 @@ ${caption}${tableContent}
           document.getElementById(STYLE_ID)?.remove();
         }, "dsh-element-inspector: listeners");
       }
-      module.exports = { apply, inject: ["settingsScope", "connection", "remote"] };
+      module.exports = { apply, inject: ["settingsScope", "connection", "remote", "slots"] };
       return module.exports;
     }
   });
