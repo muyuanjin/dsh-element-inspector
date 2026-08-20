@@ -60,7 +60,7 @@ dsh web
 也可以直接从 GitHub 安装本版本的源码快照：
 
 ```sh
-dsh plugin --profile web add github:muyuanjin/dsh-element-inspector#v0.6.0
+dsh plugin --profile web add github:muyuanjin/dsh-element-inspector#v0.7.0
 ```
 
 本仓库已包含构建后的运行时入口，因此这种安装方式同样不需要执行安装期构建脚本。

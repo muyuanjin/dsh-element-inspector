@@ -60,7 +60,7 @@ dsh web
 To install the source snapshot for this release directly from GitHub instead:
 
 ```sh
-dsh plugin --profile web add github:muyuanjin/dsh-element-inspector#v0.6.0
+dsh plugin --profile web add github:muyuanjin/dsh-element-inspector#v0.7.0
 ```
 
 The repository includes the built runtime entry points, so this installation also requires no install-time build script.
